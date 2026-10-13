@@ -1,32 +1,32 @@
 <p align="center">
-  <img src="assets/branding/playstrike-lyrebird-icon.png" alt="PlayStrike lyrebird logo" width="160" height="160">
+  <img src="assets/branding/playstrike-lyrebird-icon.png" alt="Original PlayStrike lyrebird logo" width="160" height="160">
 </p>
 
 # PlayStrike
 
 **by PWDS**
 
-**Press play on your own media.**
+**Press play on media you already have.** PlayStrike is a focused Windows desktop player for local video and audio files. Open a file, drop it into the window, or pass its path when launching.
 
-PlayStrike is a focused desktop player for files already on your PC. Open or drop a video or audio file, pause and resume, move through it with seek controls, and adjust volume.
+[How to run](#run-from-source) · [Verification](VERIFY.md) · [Original artwork](assets/branding)
 
-## Highlights
+## The player
 
-- Open local video and audio files.
-- Use play, pause, seek, and volume controls.
-- Drop a file into the player to start a session.
+### Open a local file your way
 
-## Current status
+Use the file picker, drag and drop, or a launch path. The player reports an error when a file cannot be opened. It does not bundle a media library, account, cloud service, or codec pack.
 
-First Windows source slice. Offline unit tests and a headless GStreamer playback test passed, but visible native UI interaction, audible output, broader file compatibility, and runtime packaging still need review. No verified installer is provided.
+### Stay in control of playback
 
-## Play a file
+Play and pause, seek with the bar or five-second steps, and adjust volume in the window. Keyboard shortcuts include **Space** for play/pause, **Left/Right** for seeking, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
 
-Open a local file with the picker, drop one into the window, or pass its path at launch. Space pauses or resumes; Left and Right seek five seconds; the seek bar commits when released. Ctrl+O opens the picker. The player displays an error for a file it cannot open.
+### Decode with the installed GStreamer runtime
+
+GStreamer supplies decoding and playback. Format support depends on the installed plugins and their licenses. The current video path copies decoded RGBA frames into an egui texture and limits preview to 4096×2160; CPU and memory costs for large videos still need measurement. Hardware decoding may be chosen by GStreamer, but presentation is not zero-copy.
 
 ## Run from source
 
-On Windows, install a Rust toolchain that supports edition 2024 and a GStreamer 1.0 MSVC x86_64 development SDK with the runtime and plugins needed for your media. No GStreamer runtime is bundled. If the SDK is installed at `C:\Program Files\gstreamer\1.0\msvc_x86_64`, set these variables for the current PowerShell session from the repository root; adjust `$gst` for a different location:
+Install a Rust toolchain that supports edition 2024 and a **GStreamer 1.0 MSVC x86_64 development SDK**, including the runtime and plugins needed for your media. If installed at the path below, run this in PowerShell from the repository root; adjust `$gst` for another location:
 
 ```powershell
 $gst = 'C:\Program Files\gstreamer\1.0\msvc_x86_64'
@@ -39,13 +39,12 @@ $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
 cargo run --locked -- path\to\media.mp4
 ```
 
-Run without a media path to choose or drop a file in the window. After dependencies have been cached, add `--offline` to the Cargo command for an offline build.
+Omit the media path to choose or drop a file in the window. Add `--offline` to Cargo after dependencies are cached. Check disk headroom before building and follow [VERIFY.md](VERIFY.md) for the remaining native review.
 
-Before building again, check disk headroom and follow [VERIFY.md](VERIFY.md). `cargo check` alone does not create a runnable binary.
+## Current status
 
-Format support depends on the installed GStreamer plugins and their codec licenses. PlayStrike does not bundle a codec pack or claim to play every file. Its first video path copies decoded RGBA frames into an egui texture and currently limits preview to 4096×2160; this has a CPU and memory cost, especially for large videos. Hardware decoding may still be selected by GStreamer, but presentation is not zero-copy. Package size and performance have not been measured. Distributing PlayStrike requires packaging the needed native runtime and reviewing plugin licensing.
+This is a **first Windows source slice**, with no verified installer. Offline unit tests and a headless GStreamer playback test passed. A hidden executable launch stayed alive with a native window handle, but visible UI interaction, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
+The original [lyrebird artwork](assets/branding) is included; native app-icon integration remains pending. Distributing PlayStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
-## Branding and next steps
-
-Original PlayStrike logo artwork is included in [assets/branding](assets/branding) and displayed above. Native app-icon and packaging integration remain pending. Next, inspect the visible Windows player, verify audible output and seek controls with local media, measure large-video CPU and memory use, and review GStreamer runtime packaging before distribution.
+Explore the other [PWDS Strike repositories](https://github.com/Gerbzz?tab=repositories&q=Strike).
