@@ -4,7 +4,25 @@
 
 # PlayStrike
 
-PlayStrike is a standalone, local media player in the Strike suite, by PWDS. This first Windows-focused source slice opens a local file and implements video and audio playback, pause/resume, seeking, volume, file drop, and playback errors. The UI and code are original; no third-party design assets are included. Offline unit tests and a headless GStreamer playback test pass; native visual and UI interaction checks are still pending.
+**by PWDS**
+
+**Press play on your own media.**
+
+PlayStrike is a focused desktop player for files already on your PC. Open or drop a video or audio file, pause and resume, move through it with seek controls, and adjust volume.
+
+### Highlights
+
+- Open local video and audio files.
+- Use play, pause, seek, and volume controls.
+- Drop a file into the player to start a session.
+
+## Current status
+
+First Windows source slice. Offline unit tests and a headless GStreamer playback test passed, but visible native UI interaction, audible output, broader file compatibility, and runtime packaging still need review. No verified installer is provided.
+
+## Play a file
+
+Open a local file or drop it into the window. Use the transport to pause, resume, seek, and change volume. A GStreamer runtime is required for playback on Windows; native controls and audible output still need hands-on acceptance.
 
 ## Run
 
