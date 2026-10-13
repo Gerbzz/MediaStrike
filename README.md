@@ -10,7 +10,7 @@
 
 PlayStrike is a focused desktop player for files already on your PC. Open or drop a video or audio file, pause and resume, move through it with seek controls, and adjust volume.
 
-### Highlights
+## Highlights
 
 - Open local video and audio files.
 - Use play, pause, seek, and volume controls.
