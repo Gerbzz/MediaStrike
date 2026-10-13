@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/branding/playstrike-lyrebird-icon.png" alt="PlayStrike lyrebird logo" width="160" height="160">
+</p>
+
 # PlayStrike
 
 PlayStrike is a standalone, local media player in the Strike suite, by PWDS. This first Windows-focused source slice opens a local file and implements video and audio playback, pause/resume, seeking, volume, file drop, and playback errors. The UI and code are original; no third-party design assets are included. Offline unit tests and a headless GStreamer playback test pass; native visual and UI interaction checks are still pending.
@@ -27,4 +31,4 @@ REA was reviewed as a reverse-engineering aid, not used as a playback dependency
 
 ## Branding and next steps
 
-The approved original PlayStrike logo is pending source integration. Next, inspect the visible Windows player, verify audible output and seek controls with local media, measure large-video CPU and memory use, and review GStreamer runtime packaging before distribution.
+Original PlayStrike logo artwork is included in [assets/branding](assets/branding) and displayed above. Native app-icon and packaging integration remain pending. Next, inspect the visible Windows player, verify audible output and seek controls with local media, measure large-video CPU and memory use, and review GStreamer runtime packaging before distribution.
