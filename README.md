@@ -24,3 +24,7 @@ Before building again, check disk headroom and follow [VERIFY.md](VERIFY.md). `c
 Format support depends on the installed GStreamer plugins and their codec licenses. PlayStrike does not bundle a codec pack or claim to play every file. Its first video path copies decoded RGBA frames into an egui texture and currently limits preview to 4096×2160; this has a CPU and memory cost, especially for large videos. Hardware decoding may still be selected by GStreamer, but presentation is not zero-copy. Package size and performance have not been measured. Distributing PlayStrike requires packaging the needed native runtime and reviewing plugin licensing.
 
 REA was reviewed as a reverse-engineering aid, not used as a playback dependency. The earlier local ClipStrike/REA pilot produced no compiled-code finding before its provider timeout; no behavior claim here rests on it.
+
+## Branding and next steps
+
+The approved original PlayStrike logo is pending source integration. Next, inspect the visible Windows player, verify audible output and seek controls with local media, measure large-video CPU and memory use, and review GStreamer runtime packaging before distribution.
