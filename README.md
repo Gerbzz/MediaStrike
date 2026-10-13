@@ -22,11 +22,11 @@ First Windows source slice. Offline unit tests and a headless GStreamer playback
 
 ## Play a file
 
-Open a local file or drop it into the window. Use the transport to pause, resume, seek, and change volume. A GStreamer runtime is required for playback on Windows; native controls and audible output still need hands-on acceptance.
+Open a local file with the picker, drop one into the window, or pass its path at launch. Space pauses or resumes; Left and Right seek five seconds; the seek bar commits when released. Ctrl+O opens the picker. The player displays an error for a file it cannot open.
 
-## Run
+## Run from source
 
-PlayStrike uses the native GStreamer runtime and plugins already installed for ClipStrike. If your Windows GStreamer SDK is at `C:\Program Files\gstreamer\1.0\msvc_x86_64`. Set it for the current PowerShell session before building or running:
+On Windows, install a Rust toolchain that supports edition 2024 and a GStreamer 1.0 MSVC x86_64 development SDK with the runtime and plugins needed for your media. No GStreamer runtime is bundled. If the SDK is installed at `C:\Program Files\gstreamer\1.0\msvc_x86_64`, set these variables for the current PowerShell session from the repository root; adjust `$gst` for a different location:
 
 ```powershell
 $gst = 'C:\Program Files\gstreamer\1.0\msvc_x86_64'
@@ -36,16 +36,15 @@ $env:PKG_CONFIG_PATH = "$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig"
 $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 = $gst
 $env:GST_PLUGIN_SYSTEM_PATH = "$gst\lib\gstreamer-1.0"
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
-cargo run --offline -- path\to\media.mp4
+cargo run --locked -- path\to\media.mp4
 ```
 
-You can also open or drop a file after launch. Space toggles playback, Left/Right skip five seconds, and Ctrl+O opens the file picker. The seek bar commits a seek when released.
+Run without a media path to choose or drop a file in the window. After dependencies have been cached, add `--offline` to the Cargo command for an offline build.
 
 Before building again, check disk headroom and follow [VERIFY.md](VERIFY.md). `cargo check` alone does not create a runnable binary.
 
 Format support depends on the installed GStreamer plugins and their codec licenses. PlayStrike does not bundle a codec pack or claim to play every file. Its first video path copies decoded RGBA frames into an egui texture and currently limits preview to 4096×2160; this has a CPU and memory cost, especially for large videos. Hardware decoding may still be selected by GStreamer, but presentation is not zero-copy. Package size and performance have not been measured. Distributing PlayStrike requires packaging the needed native runtime and reviewing plugin licensing.
 
-REA was reviewed as a reverse-engineering aid, not used as a playback dependency. The earlier local ClipStrike/REA pilot produced no compiled-code finding before its provider timeout; no behavior claim here rests on it.
 
 ## Branding and next steps
 
