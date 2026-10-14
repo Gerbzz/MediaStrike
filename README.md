@@ -4,7 +4,12 @@
 
 # PlayStrike
 
-**by PWDS**
+<p align="center">
+  <a href="https://prowebdevsolutions.com"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/PWDS-logo-orange.svg">
+    <img src="assets/branding/PWDS-logo.png" alt="PWDS company logo" width="120">
+  </picture></a>
+</p>
 
 **Press play on media you already have.** PlayStrike is a focused Windows desktop player for local video and audio files. Open a file, drop it into the window, or pass its path when launching.
 
@@ -48,3 +53,7 @@ This is a **first Windows source slice**, with no verified installer. Offline un
 The original [lyrebird artwork](assets/branding) is included; native app-icon integration remains pending. Distributing PlayStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
 Explore the other [PWDS Strike repositories](https://github.com/Gerbzz?tab=repositories&q=Strike).
+
+## PWDS brand artwork
+
+The company mark in this masthead is the existing [official PWDS logo](https://github.com/Gerbzz/PWDS-Website/blob/main/public/prowebdevsolutions-logo.png), with the [official orange display asset](https://prowebdevsolutions.com/images/prowebdevsolutions-logo-orange.svg) for dark backgrounds. Any app logo above it remains the original Strike suite artwork.
