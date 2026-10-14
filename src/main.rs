@@ -2,8 +2,31 @@ mod player;
 
 use eframe::egui;
 use player::Player;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+struct CaptureOnce {
+    path: PathBuf,
+    outcome: Arc<Mutex<Option<Result<(), String>>>>,
+    started: Instant,
+    settle_frames: u8,
+    requested: bool,
+}
+
+impl CaptureOnce {
+    fn new(path: PathBuf, outcome: Arc<Mutex<Option<Result<(), String>>>>) -> Self {
+        Self {
+            path,
+            outcome,
+            started: Instant::now(),
+            settle_frames: 0,
+            requested: false,
+        }
+    }
+}
 
 struct PlayStrike {
     player: Option<Player>,
@@ -13,10 +36,15 @@ struct PlayStrike {
     status: String,
     error: Option<String>,
     gst_ready: bool,
+    capture: Option<CaptureOnce>,
 }
 
 impl PlayStrike {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+        media_path: Option<PathBuf>,
+        capture: Option<CaptureOnce>,
+    ) -> Self {
         let (gst_ready, error) = match gstreamer::init() {
             Ok(()) => (true, None),
             Err(err) => (false, Some(format!("GStreamer could not start: {err}"))),
@@ -30,10 +58,11 @@ impl PlayStrike {
             status: "Open or drop a local media file".to_owned(),
             error,
             gst_ready,
+            capture,
         };
         if app.gst_ready {
-            if let Some(path) = std::env::args_os().nth(1) {
-                app.open(PathBuf::from(path), cc.egui_ctx.clone());
+            if let Some(path) = media_path {
+                app.open(path, cc.egui_ctx.clone());
             }
         }
         app
@@ -118,6 +147,86 @@ impl PlayStrike {
             self.texture = None;
             self.seek_preview = None;
         }
+    }
+
+    fn write_capture_png(
+        path: &std::path::Path,
+        screenshot: &egui::ColorImage,
+    ) -> Result<(), String> {
+        let [width, height] = screenshot.size;
+        let bytes = width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or("Screenshot dimensions overflow")?;
+        let mut pixels = Vec::with_capacity(bytes);
+        for color in &screenshot.pixels {
+            pixels.extend_from_slice(&color.to_array());
+        }
+        if pixels.len() != bytes {
+            return Err("Screenshot pixel count does not match dimensions".into());
+        }
+        let width = u32::try_from(width).map_err(|_| "Screenshot width exceeds PNG limits")?;
+        let height = u32::try_from(height).map_err(|_| "Screenshot height exceeds PNG limits")?;
+        let image = image::RgbaImage::from_raw(width, height, pixels)
+            .ok_or("Could not construct screenshot image")?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|error| format!("Create screenshot {}: {error}", path.display()))?;
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut file, image::ImageFormat::Png)
+            .map_err(|error| format!("Encode screenshot: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("Sync screenshot: {error}"))?;
+        Ok(())
+    }
+
+    fn finish_capture(&mut self, ctx: &egui::Context, result: Result<(), String>) {
+        if let Some(capture) = self.capture.take() {
+            *capture.outcome.lock().unwrap() = Some(result);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn capture_after_frame(&mut self, ctx: &egui::Context) {
+        let Some(capture) = self.capture.as_ref() else {
+            return;
+        };
+        if capture.started.elapsed() > Duration::from_secs(15) {
+            self.finish_capture(
+                ctx,
+                Err("Timed out waiting for a decoded video frame".into()),
+            );
+            return;
+        }
+        if capture.requested {
+            let image = ctx.input(|input| {
+                input.events.iter().find_map(|event| match event {
+                    egui::Event::Screenshot { image, .. } => Some(Arc::clone(image)),
+                    _ => None,
+                })
+            });
+            if let Some(image) = image {
+                let result = Self::write_capture_png(&capture.path, &image);
+                self.finish_capture(ctx, result);
+            } else {
+                ctx.request_repaint();
+            }
+            return;
+        }
+        if self.texture.is_none() {
+            ctx.request_repaint_after(Duration::from_millis(40));
+            return;
+        }
+        let capture = self.capture.as_mut().unwrap();
+        if capture.settle_frames < 2 {
+            capture.settle_frames += 1;
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            capture.requested = true;
+        }
+        ctx.request_repaint();
     }
 }
 
@@ -271,6 +380,7 @@ impl eframe::App for PlayStrike {
                 self.open(path, ctx.clone());
             }
         }
+        self.capture_after_frame(ctx);
     }
 }
 
@@ -290,7 +400,28 @@ fn format_time(seconds: f64) -> String {
     }
 }
 
-fn main() -> eframe::Result {
+fn main() -> ExitCode {
+    let mut args = std::env::args_os().skip(1);
+    let media_path = args.next().map(PathBuf::from);
+    let capture_path = match (args.next(), args.next(), args.next()) {
+        (None, None, None) => None,
+        (Some(flag), Some(output), None) if flag == "--capture" && media_path.is_some() => {
+            let path = PathBuf::from(output);
+            if path.extension().is_none_or(|ext| ext != "png") {
+                eprintln!("Capture path must end in .png");
+                return ExitCode::FAILURE;
+            }
+            Some(path)
+        }
+        _ => {
+            eprintln!("Usage: playstrike [MEDIA_FILE [--capture FILE.png]]");
+            return ExitCode::FAILURE;
+        }
+    };
+    let capture_result = capture_path.as_ref().map(|_| Arc::new(Mutex::new(None)));
+    let capture = capture_path
+        .zip(capture_result.clone())
+        .map(|(path, outcome)| CaptureOnce::new(path, outcome));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1120.0, 720.0])
@@ -298,11 +429,30 @@ fn main() -> eframe::Result {
             .with_title("PlayStrike"),
         ..Default::default()
     };
-    eframe::run_native(
+    match eframe::run_native(
         "PlayStrike",
         options,
-        Box::new(|cc| Ok(Box::new(PlayStrike::new(cc)))),
-    )
+        Box::new(move |cc| Ok(Box::new(PlayStrike::new(cc, media_path, capture)))),
+    ) {
+        Ok(()) => match capture_result {
+            None => ExitCode::SUCCESS,
+            Some(result) => match result.lock().unwrap().take() {
+                Some(Ok(())) => ExitCode::SUCCESS,
+                Some(Err(error)) => {
+                    eprintln!("PlayStrike capture: {error}");
+                    ExitCode::FAILURE
+                }
+                None => {
+                    eprintln!("PlayStrike capture: window closed before screenshot completed");
+                    ExitCode::FAILURE
+                }
+            },
+        },
+        Err(error) => {
+            eprintln!("PlayStrike window: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]

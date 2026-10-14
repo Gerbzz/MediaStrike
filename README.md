@@ -15,6 +15,12 @@
 
 [How to run](#run-from-source) · [Verification](VERIFY.md) · [Original artwork](assets/branding)
 
+## Player preview
+
+![PlayStrike showing a decoded frame from a synthetic local WebM](assets/screenshots/playstrike-player.png)
+
+This [app-rendered capture](docs/SCREENSHOT_PROVENANCE.md) shows a first-party two-second test pattern in the current Windows player. It shows the visible interface; transport interaction and audible output still need hands-on review.
+
 ## The player
 
 ### Open a local file your way
@@ -48,7 +54,7 @@ Omit the media path to choose or drop a file in the window. Add `--offline` to C
 
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer. Offline unit tests and a headless GStreamer playback test passed. A hidden executable launch stayed alive with a native window handle, but visible UI interaction, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer. Offline unit tests and a headless GStreamer playback test passed. A current app-rendered screenshot verifies the visible player window and one decoded synthetic video frame. Interactive transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
 The original [lyrebird artwork](assets/branding) is included; native app-icon integration remains pending. Distributing PlayStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 

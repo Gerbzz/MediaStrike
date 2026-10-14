@@ -10,5 +10,6 @@ eframe = { version = "=0.30.0", default-features = false, features = ["default_f
 gstreamer = "=0.23.7"
 gstreamer-app = "=0.23.5"
 gstreamer-video = "=0.23.6"
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
 rfd = "=0.15.4"
 url = "=2.5.8"
