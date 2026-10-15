@@ -200,12 +200,15 @@ impl MediaStrike {
 
     fn skip(&mut self, delta: f64) {
         if let Some(player) = &self.player {
-            let current = player.position().unwrap_or(0.0);
-            let target = if let Some(end) = player.duration() {
-                (current + delta).clamp(0.0, end)
-            } else {
-                (current + delta).max(0.0)
+            // A key press can arrive while playbin is still discovering the file.
+            // The seek bar is unavailable then; keyboard seek should behave the same way.
+            let (Some(current), Some(end)) = (player.position(), player.duration()) else {
+                return;
             };
+            if end <= 0.0 {
+                return;
+            }
+            let target = (current + delta).clamp(0.0, end);
             if let Err(err) = player.seek(target) {
                 self.error = Some(err);
             }
@@ -813,7 +816,7 @@ mod tests {
         let mut rect = egui::Rect::NOTHING;
         let mut focused = false;
         let mut shortcuts = PlayerShortcuts::default();
-        ctx.run(input, |ctx| {
+        let _ = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response = ui.add(egui::TextEdit::singleline(filter).hint_text("Filter queue"));
                 rect = response.rect;
@@ -978,6 +981,16 @@ mod tests {
         assert_eq!(app.queue.current(), Some(0));
         assert_eq!(app.player.as_ref().unwrap().path, first);
 
+        app.skip(0.5);
+        assert!(
+            app.error.is_none(),
+            "early seek should wait for file discovery"
+        );
+        let ready_deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < ready_deadline && app.player.as_ref().unwrap().duration().is_none() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.player.as_ref().unwrap().duration().is_some());
         app.toggle();
         assert!(!app.player.as_ref().unwrap().playing);
         app.skip(0.5);
