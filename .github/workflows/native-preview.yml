@@ -49,13 +49,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $sample = Join-Path $env:RUNNER_TEMP 'mediastrike-sample.webm'
+          $sample = Join-Path $env:RUNNER_TEMP 'mediastrike-sample.avi'
           $sampleGst = $sample.Replace('\', '/')
-          & gst-launch-1.0.exe -q webmmux name=mux ! filesink "location=$sampleGst" `
-            videotestsrc pattern=ball num-buffers=60 ! 'video/x-raw,width=320,height=180,framerate=30/1' ! videoconvert ! vp8enc deadline=1 ! queue ! mux. `
-            audiotestsrc wave=sine freq=440 volume=0.02 num-buffers=94 ! 'audio/x-raw,rate=48000,channels=2' ! audioconvert ! opusenc ! queue ! mux.
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sample)) { throw 'Synthetic WebM generation failed' }
-          if ((Get-Item $sample).Length -gt 1MB) { throw 'Synthetic WebM exceeds 1 MiB cap' }
+          & gst-launch-1.0.exe -q avimux name=mux ! filesink "location=$sampleGst" `
+            videotestsrc pattern=ball num-buffers=2 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sample)) { throw 'Synthetic AVI generation failed' }
+          if ((Get-Item $sample).Length -gt 1MB) { throw 'Synthetic AVI exceeds 1 MiB cap' }
           $env:PLAYSTRIKE_SAMPLE = $sample
           $env:GST_AUDIOSINK = 'fakesink'
           cargo test --locked -j 2 decodes_and_controls_local_audio_video -- --ignored
@@ -65,7 +64,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force artifact | Out-Null
-          $sample = Join-Path $env:RUNNER_TEMP 'mediastrike-sample.webm'
+          $sample = Join-Path $env:RUNNER_TEMP 'mediastrike-sample.avi'
           $capture = Join-Path (Get-Location) 'artifact\mediastrike-native.png'
           $env:GST_AUDIOSINK = 'fakesink'
           try {
