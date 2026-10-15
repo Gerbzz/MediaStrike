@@ -25,14 +25,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $base = 'https://gstreamer.freedesktop.org/data/pkg/windows/1.26.11/msvc'
-          $files = @(
-            'gstreamer-1.0-msvc-x86_64-1.26.11.msi',
-            'gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi'
+          # Sizes checked against the official server on 15 October 2026.
+          $installers = @(
+            @{ Name = 'gstreamer-1.0-msvc-x86_64-1.26.11.msi'; Size = 88322048 },
+            @{ Name = 'gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi'; Size = 369569792 }
           )
-          foreach ($file in $files) {
+          foreach ($installer in $installers) {
+            $file = $installer.Name
+            $size = [int64]$installer.Size
             $url = "$base/$file"
-            $head = Invoke-WebRequest -Uri $url -Method Head -TimeoutSec 60
-            $size = [int64]($head.Headers['Content-Length'] | Select-Object -First 1)
             if ($size -lt 1 -or $size -gt 400MB) {
               throw "GStreamer installer outside 1-400 MiB cap: $file ($size bytes)"
             }
@@ -48,7 +49,8 @@ jobs:
                     $range = "bytes=$offset-$end"
                     $response = Invoke-WebRequest -Uri $url -Headers @{ Range = $range } -OutFile $part -PassThru -TimeoutSec 120
                     $expected = $end - $offset + 1
-                    if ([int]$response.StatusCode -ne 206 -or (Get-Item $part).Length -ne $expected) {
+                    $contentRange = $response.Headers['Content-Range'] -join ''
+                    if ([int]$response.StatusCode -ne 206 -or $contentRange -ne "bytes $offset-$end/$size" -or (Get-Item $part).Length -ne $expected) {
                       throw "Invalid range response for $file ($range)"
                     }
                     $inputFile = [System.IO.File]::OpenRead($part)
