@@ -6,8 +6,8 @@ The feature groups below come from VideoLAN's [desktop basic usage](https://docs
 
 | Area | Current MediaStrike implementation | Verification and remaining work |
 | --- | --- | --- |
-| Local playback | Open local video/audio by picker, drop, or launch path; play/pause, seek, volume; session queue with next/previous and repeat | Synthetic AVI decoded on hosted Windows and appeared in a native renderer capture. Queue behavior has unit tests. Multi-file UI interaction and audible output still need hands-on review. |
-| Playlist and library | Rust-managed session queue, selection, and optional right panel | No saved playlists, media scanning, search, sort, reorder, metadata index, or persistent library yet. |
+| Local playback | Open local video/audio by picker, drop, or launch path; play/pause, seek, volume; session queue with next/previous and repeat | Synthetic AVI decoded on hosted Windows and appeared in a native renderer capture. The capture shows two files in the queue, and queue behavior has unit tests. Multi-file UI interaction and audible output still need hands-on review. |
+| Playlist and library | Rust-managed session queue, selection, and optional right panel | Two queued test files are visible in the native capture. No saved playlists, media scanning, sort, reorder, metadata index, or persistent library yet; queue filtering exists but has not had an interactive review. |
 | Video presentation | Decoded frames copied to an egui texture, bounded to 4096 x 2160 | No fullscreen control, snapshot command, aspect/crop, deinterlace, HDR, 360-degree display, or measured large-video performance. |
 | Audio | GStreamer audio sink and volume control | No track/output selection, equalizer, visualization, effects, or verified audible playback. |
 | Subtitles | No explicit controls | Embedded/external subtitle selection, styling, and synchronization remain. |

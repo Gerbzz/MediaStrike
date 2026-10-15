@@ -17,11 +17,17 @@
 
 ## Player preview
 
-### MediaStrike draft interface
+### MediaStrike queue layout draft
+
+![MediaStrike queue layout showing two synthetic local files and a decoded frame](assets/screenshots/mediastrike-queue-preview.png)
+
+This [native renderer capture](docs/QUEUE_CAPTURE_PROVENANCE.md) shows the current queue branch with two local files in its session queue. It verifies the visible layout and one decoded frame; hands-on transport and queue interaction still need review.
+
+### Earlier MediaStrike draft interface
 
 ![MediaStrike draft showing a decoded frame from a synthetic local AVI](assets/screenshots/mediastrike-draft-player-2026-10-15.png)
 
-This [app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame in the native Windows player. Transport interaction and audible output still need hands-on review.
+This [earlier app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame before the queue layout.
 
 ### Historical PlayStrike interface
 
@@ -68,7 +74,7 @@ The executable and Cargo package are still named `playstrike` so existing launch
 
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer or VLC feature parity. A hosted Windows build, Rust unit tests, and a GStreamer playback test with a small uncompressed AVI passed. The screenshot currently shown above records an earlier MediaStrike draft before the queue layout; an updated capture is pending. Interactive queue and transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer or VLC feature parity. A hosted Windows build, Rust unit tests, and a GStreamer playback test with a small uncompressed AVI passed. A native renderer capture shows two queued test files and a decoded frame. Interactive queue and transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
 The original [lyrebird artwork](assets/branding) is included in the start view and About panel; native app-icon integration remains pending. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
