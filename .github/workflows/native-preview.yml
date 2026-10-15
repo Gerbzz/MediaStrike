@@ -37,8 +37,35 @@ jobs:
               throw "GStreamer installer outside 1-400 MiB cap: $file ($size bytes)"
             }
             $path = Join-Path $env:RUNNER_TEMP $file
-            & curl.exe --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --max-time 600 --output $path $url
-            if ($LASTEXITCODE -ne 0) { throw "Could not download GStreamer installer: $file" }
+            $part = "$path.part"
+            $output = [System.IO.File]::Open($path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+            try {
+              for ([int64]$offset = 0; $offset -lt $size; $offset += 4MB) {
+                $end = [Math]::Min($offset + 4MB - 1, $size - 1)
+                $downloaded = $false
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                  try {
+                    $range = "bytes=$offset-$end"
+                    $response = Invoke-WebRequest -Uri $url -Headers @{ Range = $range } -OutFile $part -PassThru -TimeoutSec 120
+                    $expected = $end - $offset + 1
+                    if ([int]$response.StatusCode -ne 206 -or (Get-Item $part).Length -ne $expected) {
+                      throw "Invalid range response for $file ($range)"
+                    }
+                    $inputFile = [System.IO.File]::OpenRead($part)
+                    try { $inputFile.CopyTo($output) } finally { $inputFile.Dispose() }
+                    $downloaded = $true
+                    break
+                  } catch {
+                    if ($attempt -eq 3) { throw }
+                    Start-Sleep -Seconds 2
+                  }
+                }
+                if (-not $downloaded) { throw "Could not download range for $file" }
+              }
+            } finally {
+              $output.Dispose()
+              Remove-Item $part -ErrorAction SilentlyContinue
+            }
             if ((Get-Item $path).Length -ne $size) { throw "Incomplete GStreamer installer: $file" }
             $process = Start-Process msiexec.exe -ArgumentList "/i `"$path`" /qn /norestart" -Wait -PassThru
             if ($process.ExitCode -notin @(0, 3010)) { throw "GStreamer installer failed: $file ($($process.ExitCode))" }
