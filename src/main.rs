@@ -73,12 +73,14 @@ struct MediaStrike {
     error: Option<String>,
     gst_ready: bool,
     capture: Option<CaptureOnce>,
+    pending_subtitle_seek: Option<f64>,
 }
 
 impl MediaStrike {
     fn new(
         cc: &eframe::CreationContext<'_>,
         media_paths: Vec<PathBuf>,
+        subtitle_path: Option<PathBuf>,
         capture: Option<CaptureOnce>,
     ) -> Self {
         let (gst_ready, error) = match gstreamer::init() {
@@ -109,9 +111,15 @@ impl MediaStrike {
             error,
             gst_ready,
             capture,
+            pending_subtitle_seek: None,
         };
         if app.gst_ready && !media_paths.is_empty() {
             app.enqueue_media(media_paths, true, cc.egui_ctx.clone());
+            if let Some(subtitle_path) = subtitle_path {
+                if let Err(error) = app.load_external_subtitle(subtitle_path, cc.egui_ctx.clone()) {
+                    app.error = Some(error);
+                }
+            }
         }
         app
     }
@@ -151,11 +159,38 @@ impl MediaStrike {
                 self.player = Some(player);
                 self.texture = None;
                 self.seek_preview = None;
+                self.pending_subtitle_seek = None;
                 self.error = None;
                 self.status = format!("Playing {}", file_label(&path));
             }
             Err(err) => self.error = Some(err),
         }
+    }
+
+    fn load_external_subtitle(
+        &mut self,
+        subtitle_path: PathBuf,
+        ctx: egui::Context,
+    ) -> Result<(), String> {
+        let current = self
+            .player
+            .as_ref()
+            .ok_or("Open a video before loading subtitles")?;
+        let media_path = current.path.clone();
+        let resume_at = current.position().unwrap_or(0.0);
+        let was_playing = current.playing;
+        let mut replacement =
+            Player::open_with_subtitle(&media_path, Some(&subtitle_path), ctx, self.volume)?;
+        if !was_playing {
+            replacement.toggle()?;
+        }
+        self.player = Some(replacement);
+        self.texture = None;
+        self.seek_preview = None;
+        self.pending_subtitle_seek = (resume_at > 0.1).then_some(resume_at);
+        self.error = None;
+        self.status = format!("Loaded subtitle file {}", file_label(&subtitle_path));
+        Ok(())
     }
 
     fn next_track(&mut self, ctx: egui::Context) {
@@ -247,6 +282,16 @@ impl MediaStrike {
                     }
                 }
             }
+            if let (Some(position), Some(duration)) =
+                (self.pending_subtitle_seek, player.duration())
+            {
+                self.pending_subtitle_seek = None;
+                if let Err(error) = player.seek(position.min(duration)) {
+                    self.error = Some(format!(
+                        "Subtitle loaded, but playback position was not restored: {error}"
+                    ));
+                }
+            }
             if player.playing {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
@@ -255,6 +300,7 @@ impl MediaStrike {
             self.player = None;
             self.texture = None;
             self.seek_preview = None;
+            self.pending_subtitle_seek = None;
         } else if finished {
             if let Some(index) = self.queue.finished_index() {
                 self.open_index(index, ctx.clone());
@@ -402,6 +448,8 @@ impl eframe::App for MediaStrike {
 
         let mut previous_clicked = false;
         let mut next_clicked = false;
+        let mut subtitle_choice: Option<Option<String>> = None;
+        let mut choose_external_subtitle = false;
         egui::TopBottomPanel::bottom("transport")
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
             .show(ctx, |ui| {
@@ -465,6 +513,53 @@ impl eframe::App for MediaStrike {
                         }
                         ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
                         ui.separator();
+                        let subtitle_tracks = player.subtitle_tracks().to_vec();
+                        let active_subtitle = player.selected_subtitle().map(str::to_owned);
+                        let selection_ready = player.subtitle_selection_ready();
+                        let external_file = player.external_subtitle().map(file_label);
+                        ui.menu_button(
+                            if external_file.is_some() {
+                                "Subtitles (file)"
+                            } else {
+                                "Subtitles"
+                            },
+                            |ui| {
+                                if subtitle_tracks.is_empty() {
+                                    ui.label("No subtitle tracks discovered");
+                                }
+                                ui.add_enabled_ui(selection_ready, |ui| {
+                                    if ui
+                                        .selectable_label(active_subtitle.is_none(), "Off")
+                                        .clicked()
+                                    {
+                                        subtitle_choice = Some(None);
+                                        ui.close_menu();
+                                    }
+                                    for track in &subtitle_tracks {
+                                        if ui
+                                            .selectable_label(
+                                                active_subtitle.as_deref()
+                                                    == Some(track.id.as_str()),
+                                                &track.label,
+                                            )
+                                            .clicked()
+                                        {
+                                            subtitle_choice = Some(Some(track.id.clone()));
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                                ui.separator();
+                                if let Some(file) = &external_file {
+                                    ui.label(format!("External: {file}"));
+                                }
+                                if ui.button("Load subtitle file...").clicked() {
+                                    choose_external_subtitle = true;
+                                    ui.close_menu();
+                                }
+                            },
+                        );
+                        ui.separator();
                         if ui.button(self.queue.repeat().label()).clicked() {
                             self.queue.cycle_repeat();
                         }
@@ -484,6 +579,21 @@ impl eframe::App for MediaStrike {
         }
         if next_clicked {
             self.next_track(ctx.clone());
+        }
+        if let Some(choice) = subtitle_choice {
+            if let Some(player) = &mut self.player {
+                match player.select_subtitle(choice.as_deref()) {
+                    Ok(()) => {
+                        self.error = None;
+                        self.status = if choice.is_some() {
+                            "Switching subtitle track".to_owned()
+                        } else {
+                            "Turning subtitles off".to_owned()
+                        };
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
         }
 
         egui::SidePanel::left("navigation")
@@ -656,6 +766,16 @@ impl eframe::App for MediaStrike {
                 self.enqueue_media(paths, play_new, ctx.clone());
             }
         }
+        if choose_external_subtitle {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Subtitle files", &["srt", "vtt"])
+                .pick_file()
+            {
+                if let Err(error) = self.load_external_subtitle(path, ctx.clone()) {
+                    self.error = Some(error);
+                }
+            }
+        }
         self.capture_after_frame(ctx);
     }
 }
@@ -689,15 +809,25 @@ fn format_time(seconds: f64) -> String {
 
 struct LaunchArgs {
     media_paths: Vec<PathBuf>,
+    subtitle_path: Option<PathBuf>,
     capture_path: Option<PathBuf>,
 }
 
 fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchArgs, String> {
     let mut args = args.into_iter().peekable();
     let mut media_paths = Vec::new();
+    let mut subtitle_path = None;
     let mut capture_path = None;
     while let Some(arg) = args.next() {
-        if arg == "--capture" {
+        if arg == "--subtitle" {
+            let Some(path) = args.next() else {
+                return Err("--subtitle requires a local .srt or .vtt file".to_owned());
+            };
+            if subtitle_path.is_some() || path == "--capture" || path == "--subtitle" {
+                return Err("Pass exactly one subtitle file to --subtitle".to_owned());
+            }
+            subtitle_path = Some(PathBuf::from(path));
+        } else if arg == "--capture" {
             let Some(output) = args.next() else {
                 return Err("--capture requires a new PNG path".to_owned());
             };
@@ -716,8 +846,12 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
             }
         }
     }
+    if subtitle_path.is_some() && media_paths.is_empty() {
+        return Err("--subtitle requires at least one media file".to_owned());
+    }
     Ok(LaunchArgs {
         media_paths,
+        subtitle_path,
         capture_path,
     })
 }
@@ -725,12 +859,13 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
 fn main() -> ExitCode {
     let LaunchArgs {
         media_paths,
+        subtitle_path,
         capture_path,
     } = match parse_launch_args(std::env::args_os().skip(1)) {
         Ok(args) => args,
         Err(error) => {
             eprintln!(
-                "{error}\nMediaStrike usage: playstrike [MEDIA_FILE ...] [--capture FILE.png]"
+                "{error}\nMediaStrike usage: playstrike [MEDIA_FILE ...] [--subtitle FILE.srt] [--capture FILE.png]"
             );
             return ExitCode::FAILURE;
         }
@@ -749,7 +884,14 @@ fn main() -> ExitCode {
     match eframe::run_native(
         "MediaStrike",
         options,
-        Box::new(move |cc| Ok(Box::new(MediaStrike::new(cc, media_paths, capture)))),
+        Box::new(move |cc| {
+            Ok(Box::new(MediaStrike::new(
+                cc,
+                media_paths,
+                subtitle_path,
+                capture,
+            )))
+        }),
     ) {
         Ok(()) => match capture_result {
             None => ExitCode::SUCCESS,
@@ -968,6 +1110,7 @@ mod tests {
             error: None,
             gst_ready: true,
             capture: None,
+            pending_subtitle_seek: None,
         };
         app.enqueue_media(vec![first.clone(), second.clone()], true, ctx.clone());
         assert_eq!(app.queue.current(), Some(0));
@@ -1040,8 +1183,28 @@ mod tests {
             [PathBuf::from("first.avi"), PathBuf::from("second.avi")]
         );
         assert_eq!(parsed.capture_path, Some(PathBuf::from("new.png")));
+        assert_eq!(parsed.subtitle_path, None);
         assert!(
             parse_launch_args([OsString::from("--capture"), OsString::from("new.png")]).is_err()
+        );
+    }
+
+    #[test]
+    fn accepts_one_external_subtitle_before_capture() {
+        let args = [
+            "first.avi",
+            "--subtitle",
+            "captions.srt",
+            "--capture",
+            "new.png",
+        ]
+        .into_iter()
+        .map(OsString::from);
+        let parsed = parse_launch_args(args).expect("valid subtitle launch");
+        assert_eq!(parsed.subtitle_path, Some(PathBuf::from("captions.srt")));
+        assert!(
+            parse_launch_args([OsString::from("--subtitle"), OsString::from("captions.srt")])
+                .is_err()
         );
     }
 }

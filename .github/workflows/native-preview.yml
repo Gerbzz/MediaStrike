@@ -2,7 +2,7 @@ name: MediaStrike native preview
 
 on:
   push:
-    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui]
+    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles]
 
 permissions:
   contents: read
@@ -64,6 +64,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Headless playback test failed' }
           cargo test --locked -j 2 native_queue_controls_and_end_of_file_advance -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Native queue and end-of-file test failed' }
+          $subtitleVideo = Join-Path $env:RUNNER_TEMP 'mediastrike-subtitle-video.avi'
+          $subtitleVideoGst = $subtitleVideo.Replace('\', '/')
+          & gst-launch-1.0.exe -q avimux name=mux ! filesink "location=$subtitleVideoGst" `
+            videotestsrc pattern=black num-buffers=6 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $subtitleVideo)) { throw 'Subtitle test AVI generation failed' }
+          if ((Get-Item $subtitleVideo).Length -gt 2MB) { throw 'Subtitle test AVI exceeds 2 MiB cap' }
+          $subtitle = Join-Path $env:RUNNER_TEMP 'mediastrike-synthetic.srt'
+          @('1', '00:00:00,000 --> 00:00:05,500', 'Synthetic subtitle test', '') | Set-Content -LiteralPath $subtitle -Encoding ascii
+          $env:PLAYSTRIKE_SUBTITLE_VIDEO = $subtitleVideo
+          $env:PLAYSTRIKE_SUBTITLE_SAMPLE = $subtitle
+          cargo test --locked -j 2 discovers_and_switches_external_subtitle_track -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'External subtitle track test failed' }
       - name: Bound and hash executable
         shell: pwsh
         run: |
