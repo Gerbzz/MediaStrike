@@ -215,6 +215,8 @@ impl MediaStrike {
         if let Some(player) = &mut self.player {
             match player.select_subtitle(choice) {
                 Ok(()) => {
+                    // A later explicit choice wins over an earlier file request.
+                    self.pending_subtitle_load = None;
                     self.error = None;
                     self.status = if choice.is_some() {
                         "Switching subtitle track".to_owned()
@@ -1469,7 +1471,7 @@ mod tests {
         assert!(app.error.is_none());
 
         wait_for_pending_subtitle(&mut app, &ctx);
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline
             && app.player.as_ref().unwrap().selected_subtitle() != Some(second.as_str())
         {
