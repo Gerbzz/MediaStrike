@@ -56,9 +56,14 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sample)) { throw 'Synthetic AVI generation failed' }
           if ((Get-Item $sample).Length -gt 1MB) { throw 'Synthetic AVI exceeds 1 MiB cap' }
           $env:PLAYSTRIKE_SAMPLE = $sample
+          $second = Join-Path $env:RUNNER_TEMP 'mediastrike-second-sample.avi'
+          Copy-Item -LiteralPath $sample -Destination $second
+          $env:PLAYSTRIKE_SAMPLE_SECOND = $second
           $env:GST_AUDIOSINK = 'fakesink'
           cargo test --locked -j 2 decodes_and_controls_local_audio_video -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Headless playback test failed' }
+          cargo test --locked -j 2 native_queue_controls_and_end_of_file_advance -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'Native queue and end-of-file test failed' }
       - name: Bound and hash executable
         shell: pwsh
         run: |

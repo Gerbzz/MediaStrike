@@ -771,10 +771,11 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{PlayerShortcuts, format_time, parse_launch_args, player_shortcuts};
+    use super::{MediaStrike, PlayerShortcuts, format_time, parse_launch_args, player_shortcuts};
     use eframe::egui;
     use std::ffi::OsString;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
 
     fn shortcut_key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
@@ -791,6 +792,14 @@ mod tests {
         filter: &mut String,
         events: Vec<egui::Event>,
     ) -> (egui::Rect, bool, PlayerShortcuts) {
+        let modifiers = events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                egui::Event::Key { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -798,6 +807,7 @@ mod tests {
             )),
             events,
             focused: true,
+            modifiers,
             ..Default::default()
         };
         let mut rect = egui::Rect::NOTHING;
@@ -860,14 +870,144 @@ mod tests {
         assert!(filter.contains("sample"));
         assert_eq!(shortcuts, PlayerShortcuts::default());
 
-        let other = egui::Context::default();
-        let (_, focused, shortcuts) = filter_frame(
-            &other,
-            &mut String::new(),
-            vec![shortcut_key(egui::Key::Space, egui::Modifiers::NONE)],
+        let alt = egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let command = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        for (key, modifiers, expected) in [
+            (
+                egui::Key::Space,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    toggle: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowLeft,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    back: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowRight,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    forward: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowLeft,
+                alt,
+                PlayerShortcuts {
+                    previous: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowRight,
+                alt,
+                PlayerShortcuts {
+                    next: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::O,
+                command,
+                PlayerShortcuts {
+                    open_files: true,
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let other = egui::Context::default();
+            let (_, focused, shortcuts) = filter_frame(
+                &other,
+                &mut String::new(),
+                vec![shortcut_key(key, modifiers)],
+            );
+            assert!(!focused, "no text field should own keyboard focus yet");
+            assert_eq!(
+                shortcuts, expected,
+                "shortcut {key:?} should work outside text"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires two generated local AVIs via PLAYSTRIKE_SAMPLE and PLAYSTRIKE_SAMPLE_SECOND"]
+    fn native_queue_controls_and_end_of_file_advance() {
+        gstreamer::init().expect("GStreamer runtime");
+        let first = PathBuf::from(std::env::var_os("PLAYSTRIKE_SAMPLE").expect("first AVI"));
+        let second =
+            PathBuf::from(std::env::var_os("PLAYSTRIKE_SAMPLE_SECOND").expect("second AVI"));
+        let ctx = egui::Context::default();
+        let mut app = MediaStrike {
+            player: None,
+            queue: Default::default(),
+            show_queue: true,
+            queue_search: String::new(),
+            texture: None,
+            brand_texture: None,
+            show_about: false,
+            seek_preview: None,
+            volume: 0.8,
+            status: String::new(),
+            error: None,
+            gst_ready: true,
+            capture: None,
+        };
+        app.enqueue_media(vec![first.clone(), second.clone()], true, ctx.clone());
+        assert_eq!(app.queue.current(), Some(0));
+        assert_eq!(app.player.as_ref().unwrap().path, first);
+        assert!(app.error.is_none());
+
+        app.next_track(ctx.clone());
+        assert_eq!(app.queue.current(), Some(1));
+        assert_eq!(app.player.as_ref().unwrap().path, second);
+        app.previous_track(ctx.clone());
+        assert_eq!(app.queue.current(), Some(0));
+        assert_eq!(app.player.as_ref().unwrap().path, first);
+
+        app.toggle();
+        assert!(!app.player.as_ref().unwrap().playing);
+        app.skip(0.5);
+        assert!(app.error.is_none(), "seek should succeed on the AVI");
+        app.volume = 0.4;
+        app.player.as_mut().unwrap().set_volume(app.volume);
+        assert_eq!(app.player.as_ref().unwrap().volume, 0.4);
+        app.toggle();
+        assert!(app.player.as_ref().unwrap().playing);
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < deadline && app.queue.current() != Some(1) {
+            app.refresh_player(&ctx);
+            assert!(app.error.is_none(), "first AVI should not fail");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(app.queue.current(), Some(1), "EOS should open second AVI");
+        assert_eq!(app.player.as_ref().unwrap().path, second);
+
+        while Instant::now() < deadline && app.status != "Finished" {
+            app.refresh_player(&ctx);
+            assert!(app.error.is_none(), "second AVI should not fail");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            app.status, "Finished",
+            "repeat-off should stop after second AVI"
         );
-        assert!(!focused, "no text field should own keyboard focus yet");
-        assert!(shortcuts.toggle, "Space should toggle outside text fields");
+        assert_eq!(app.queue.current(), Some(1));
+        assert!(!app.player.as_ref().unwrap().playing);
     }
 
     #[test]
