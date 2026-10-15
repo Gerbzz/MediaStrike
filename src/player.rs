@@ -32,6 +32,7 @@ pub struct Player {
     selected_subtitle: Option<String>,
     subtitles_enabled: bool,
     streams_selected: bool,
+    prerolled: bool,
     external_subtitle: Option<PathBuf>,
 }
 
@@ -112,6 +113,7 @@ impl Player {
             selected_subtitle: None,
             subtitles_enabled: true,
             streams_selected: false,
+            prerolled: false,
             external_subtitle: external.map(|(path, _)| path),
         })
     }
@@ -134,6 +136,10 @@ impl Player {
 
     pub fn subtitle_selection_ready(&self) -> bool {
         self.streams_selected
+    }
+
+    pub fn prerolled(&self) -> bool {
+        self.prerolled
     }
 
     pub fn select_subtitle(&mut self, id: Option<&str>) -> Result<(), String> {
@@ -277,6 +283,7 @@ impl Player {
                     }
                     self.streams_selected = true;
                 }
+                gst::MessageView::AsyncDone(..) => self.prerolled = true,
                 gst::MessageView::Error(error) => {
                     self.playing = false;
                     return Some(Err(format!("Playback failed: {}", error.error())));
@@ -389,6 +396,23 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, Instant};
 
+    fn text_output_enabled(player: &Player) -> bool {
+        let flags = player.pipeline.property_value("flags");
+        let class = gst::glib::FlagsClass::with_type(flags.type_()).unwrap();
+        class.is_set_by_nick(&flags, "text")
+    }
+
+    fn wait_for_selected_track(player: &mut Player, track_id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && player.selected_subtitle() != Some(track_id) {
+            if let Some(event) = player.poll_event() {
+                event.expect("subtitle stream switch should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.selected_subtitle(), Some(track_id));
+    }
+
     #[test]
     fn removes_video_row_padding_without_mixing_rows() {
         let source = [1, 2, 3, 4, 99, 99, 5, 6, 7, 8, 88, 88];
@@ -408,12 +432,6 @@ mod tests {
     #[test]
     #[ignore = "requires a generated local AVI and SRT via PLAYSTRIKE_SUBTITLE_VIDEO and PLAYSTRIKE_SUBTITLE_SAMPLE"]
     fn discovers_and_switches_external_subtitle_track() {
-        fn text_output_enabled(player: &Player) -> bool {
-            let flags = player.pipeline.property_value("flags");
-            let class = gst::glib::FlagsClass::with_type(flags.type_()).unwrap();
-            class.is_set_by_nick(&flags, "text")
-        }
-
         gstreamer::init().expect("GStreamer runtime");
         let video = std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("subtitle video");
         let subtitle = std::env::var_os("PLAYSTRIKE_SUBTITLE_SAMPLE").expect("subtitle SRT");
@@ -470,6 +488,46 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(player.selected_subtitle(), Some(track.as_str()));
+        assert!(text_output_enabled(&player));
+    }
+
+    #[test]
+    #[ignore = "requires a generated Matroska fixture via PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO"]
+    fn discovers_switches_and_disables_two_embedded_tracks() {
+        gst::init().expect("GStreamer runtime");
+        let path = std::env::var_os("PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO")
+            .expect("embedded subtitle Matroska fixture");
+        let mut player = Player::open(Path::new(&path), eframe::egui::Context::default(), 0.2)
+            .expect("open synthetic Matroska fixture");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && (!player.subtitle_selection_ready() || player.subtitle_tracks().len() < 2)
+        {
+            if let Some(event) = player.poll_event() {
+                event.expect("embedded subtitle discovery should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.subtitle_tracks().len(), 2);
+        let first = player.subtitle_tracks()[0].id.clone();
+        let second = player.subtitle_tracks()[1].id.clone();
+        assert_ne!(first, second);
+
+        player
+            .select_subtitle(Some(&first))
+            .expect("select first track");
+        wait_for_selected_track(&mut player, &first);
+        player
+            .select_subtitle(Some(&second))
+            .expect("switch to second track");
+        wait_for_selected_track(&mut player, &second);
+        player.select_subtitle(None).expect("turn text output off");
+        assert_eq!(player.selected_subtitle(), None);
+        assert!(!text_output_enabled(&player));
+        player
+            .select_subtitle(Some(&first))
+            .expect("restore first track");
+        wait_for_selected_track(&mut player, &first);
         assert!(text_output_enabled(&player));
     }
 
