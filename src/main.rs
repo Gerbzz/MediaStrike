@@ -41,6 +41,7 @@ fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
 
 struct CaptureOnce {
     path: PathBuf,
+    subtitle_path: Option<PathBuf>,
     outcome: Arc<Mutex<Option<Result<(), String>>>>,
     started: Instant,
     settle_frames: u8,
@@ -54,9 +55,14 @@ struct PendingSubtitleLoad {
 }
 
 impl CaptureOnce {
-    fn new(path: PathBuf, outcome: Arc<Mutex<Option<Result<(), String>>>>) -> Self {
+    fn new(
+        path: PathBuf,
+        subtitle_path: Option<PathBuf>,
+        outcome: Arc<Mutex<Option<Result<(), String>>>>,
+    ) -> Self {
         Self {
             path,
+            subtitle_path,
             outcome,
             started: Instant::now(),
             settle_frames: 0,
@@ -205,7 +211,7 @@ impl MediaStrike {
         }
     }
 
-    fn refresh_pending_subtitle(&mut self) {
+    fn refresh_pending_subtitle(&mut self, ctx: &egui::Context) {
         let Some(mut pending) = self.pending_subtitle_load.take() else {
             return;
         };
@@ -228,6 +234,7 @@ impl MediaStrike {
             || pending.player.duration().is_none()
         {
             self.pending_subtitle_load = Some(pending);
+            ctx.request_repaint_after(Duration::from_millis(40));
             return;
         }
         let Some(current) = self.player.as_ref() else {
@@ -320,7 +327,7 @@ impl MediaStrike {
     }
 
     fn refresh_player(&mut self, ctx: &egui::Context) {
-        self.refresh_pending_subtitle();
+        self.refresh_pending_subtitle(ctx);
         let mut failed = false;
         let mut finished = false;
         if let Some(player) = &mut self.player {
@@ -432,6 +439,22 @@ impl MediaStrike {
                 Err("Timed out waiting for a decoded video frame".into()),
             );
             return;
+        }
+        if let Some(expected) = &capture.subtitle_path {
+            if self.pending_subtitle_load.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(40));
+                return;
+            }
+            let attached = self.player.as_ref().and_then(Player::external_subtitle);
+            if expected.canonicalize().ok().as_deref() != attached {
+                self.finish_capture(
+                    ctx,
+                    Err(self.error.clone().unwrap_or_else(|| {
+                        format!("Subtitle file was not loaded: {}", expected.display())
+                    })),
+                );
+                return;
+            }
         }
         if capture.requested {
             let image = ctx.input(|input| {
@@ -943,7 +966,7 @@ fn main() -> ExitCode {
     let capture_result = capture_path.as_ref().map(|_| Arc::new(Mutex::new(None)));
     let capture = capture_path
         .zip(capture_result.clone())
-        .map(|(path, outcome)| CaptureOnce::new(path, outcome));
+        .map(|(path, outcome)| CaptureOnce::new(path, subtitle_path.clone(), outcome));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1120.0, 720.0])

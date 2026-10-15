@@ -21,7 +21,7 @@
 
 ![MediaStrike playing a synthetic local AVI with an external SRT caption](assets/screenshots/mediastrike-subtitles-srt-preview.png)
 
-This [native renderer capture](docs/SUBTITLE_CAPTURE_PROVENANCE.md) shows a visible SRT caption from the isolated subtitle branch. A [WebVTT capture](assets/screenshots/mediastrike-subtitles-vtt-preview.png) from the same executable is also available. Both use synthetic local files. Track switching and Off passed the hosted player test; native menu clicks still need hands-on review.
+This [native renderer capture](docs/SUBTITLE_CAPTURE_PROVENANCE.md) shows a visible SRT caption from the isolated subtitle branch. A [WebVTT capture](assets/screenshots/mediastrike-subtitles-vtt-preview.png) from the same executable is also available. Both use synthetic local files. [Hosted follow-up tests](docs/SUBTITLE_FOLLOWUP_VERIFICATION.md) cover two embedded tracks, switching and Off, file choice while playing or paused, malformed files, and Repeat one. Native menu clicks still need hands-on review.
 
 ### MediaStrike queue layout draft
 
@@ -57,7 +57,7 @@ Play and pause, seek with the bar or five-second steps, and adjust volume in the
 
 ### Choose local subtitles
 
-Open the **Subtitles** menu in the transport rail to turn captions off, choose a discovered text track, or load a local `.srt` or `.vtt` file for the current media. Loading a file opens the current media again and attempts to restore its playback position and pause state. Track availability depends on GStreamer plugins and the file; the menu reports unsupported extensions, missing files, and selection errors. For a launch-time subtitle, use `--subtitle path\to\captions.srt` after the media path. The file applies to the first opened item, not every item in the session queue. Subtitle styling, offset adjustment, and saved associations remain future work.
+Open the **Subtitles** menu in the transport rail to turn captions off, choose a discovered text track, or load a local `.srt` or `.vtt` file for the current media. Loading a file prepares a replacement player while the current one continues, then restores its playback position and pause state before switching. An invalid file keeps the current player. Track availability depends on GStreamer plugins and the file; the menu reports unsupported extensions, missing files, and selection errors. For a launch-time subtitle, use `--subtitle path\to\captions.srt` after the media path. The file applies to the first opened item, not every item in the session queue. Subtitle styling, offset adjustment, and saved associations remain future work.
 
 ### Decode with the installed GStreamer runtime
 
