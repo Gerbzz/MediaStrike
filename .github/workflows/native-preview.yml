@@ -20,37 +20,20 @@ jobs:
       - name: Select stable Rust
         shell: pwsh
         run: rustup default stable
-      - name: Install official GStreamer MSVC SDK
+      - name: Install GStreamer 1.26.11 from conda-forge
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $base = 'https://gstreamer.freedesktop.org/data/pkg/windows/1.26.11/msvc'
-          # Sizes checked against the official server on 15 October 2026.
-          $installers = @(
-            @{ Name = 'gstreamer-1.0-msvc-x86_64-1.26.11.msi'; Size = 88322048 },
-            @{ Name = 'gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi'; Size = 369569792 }
-          )
-          foreach ($installer in $installers) {
-            $file = $installer.Name
-            $size = [int64]$installer.Size
-            $url = "$base/$file"
-            if ($size -lt 1 -or $size -gt 400MB) {
-              throw "GStreamer installer outside 1-400 MiB cap: $file ($size bytes)"
-            }
-            $path = Join-Path $env:RUNNER_TEMP $file
-            # aria2 is part of the standard windows-latest image. It resumes
-            # partial transfers when the upstream CDN closes a connection.
-            & aria2c.exe --max-connection-per-server=1 --split=1 --min-split-size=1M --max-tries=20 --retry-wait=5 --timeout=30 --connect-timeout=30 --dir=$env:RUNNER_TEMP --out=$file $url
-            if ($LASTEXITCODE -ne 0) { throw "Could not download GStreamer installer: $file" }
-            if ((Get-Item $path).Length -ne $size) { throw "Incomplete GStreamer installer: $file" }
-            $process = Start-Process msiexec.exe -ArgumentList "/i `"$path`" /qn /norestart" -Wait -PassThru
-            if ($process.ExitCode -notin @(0, 3010)) { throw "GStreamer installer failed: $file ($($process.ExitCode))" }
-          }
-          $gst = @(
-            'C:\gstreamer\1.0\msvc_x86_64',
-            'C:\Program Files\gstreamer\1.0\msvc_x86_64'
-          ) | Where-Object { Test-Path (Join-Path $_ 'bin\pkg-config.exe') } | Select-Object -First 1
-          if (-not $gst) { throw 'GStreamer MSVC SDK was not found after installation' }
+          $conda = Join-Path $env:CONDA 'Scripts\conda.exe'
+          $prefix = Join-Path $env:RUNNER_TEMP 'mediastrike-gstreamer'
+          & $conda create --yes --prefix $prefix --override-channels --channel conda-forge --solver libmamba 'gstreamer=1.26.11' 'gst-plugins-base=1.26.11' 'gst-plugins-good=1.26.11' pkg-config
+          if ($LASTEXITCODE -ne 0) { throw 'Conda-forge GStreamer installation failed' }
+          $gst = Join-Path $prefix 'Library'
+          if (-not (Test-Path (Join-Path $gst 'bin\pkg-config.exe'))) { throw 'Conda-forge pkg-config was not found' }
+          if (-not (Test-Path (Join-Path $gst 'bin\gst-launch-1.0.exe'))) { throw 'Conda-forge GStreamer runtime was not found' }
+          $env:PKG_CONFIG_PATH = "$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig"
+          & "$gst\bin\pkg-config.exe" --modversion gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0
+          if ($LASTEXITCODE -ne 0) { throw 'Conda-forge GStreamer development files are incomplete' }
           "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gst" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "PKG_CONFIG=$gst\bin\pkg-config.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "PKG_CONFIG_PATH=$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
