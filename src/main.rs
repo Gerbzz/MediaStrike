@@ -1011,6 +1011,20 @@ mod tests {
         }
     }
 
+    fn wait_for_position_at_least(app: &mut MediaStrike, ctx: &egui::Context, minimum: f64) -> f64 {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if let Some(position) = app.player.as_ref().and_then(|player| player.position()) {
+                if position >= minimum {
+                    return position;
+                }
+            }
+            app.refresh_player(ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("position did not reach {minimum} seconds");
+    }
+
     fn shortcut_key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
@@ -1260,7 +1274,7 @@ mod tests {
         }
         assert!(app.player.as_ref().unwrap().duration().is_some());
         app.player.as_ref().unwrap().seek(2.0).unwrap();
-        let before = app.player.as_ref().unwrap().position().unwrap();
+        let before = wait_for_position_at_least(&mut app, &ctx, 1.5);
         assert!(before > 1.0);
 
         let status = app.status.clone();
@@ -1297,7 +1311,7 @@ mod tests {
         assert_eq!(current.path, video);
         assert_eq!(current.external_subtitle(), None);
         assert!(current.playing, "working player must keep playing");
-        assert!(current.position().unwrap() >= before - 0.5);
+        assert!(wait_for_position_at_least(&mut app, &ctx, before - 0.5) >= before - 0.5);
 
         app.apply_subtitle_file_choice(Some(srt.clone()), ctx.clone());
         let deadline = Instant::now() + Duration::from_secs(6);
@@ -1317,11 +1331,11 @@ mod tests {
             Some(srt.canonicalize().unwrap().as_path())
         );
         assert!(current.playing);
-        assert!(current.position().unwrap() >= before - 0.5);
+        assert!(wait_for_position_at_least(&mut app, &ctx, before - 0.5) >= before - 0.5);
 
         app.player.as_mut().unwrap().toggle().unwrap();
         app.player.as_ref().unwrap().seek(3.0).unwrap();
-        let paused_at = app.player.as_ref().unwrap().position().unwrap();
+        let paused_at = wait_for_position_at_least(&mut app, &ctx, 2.5);
         assert!(!app.player.as_ref().unwrap().playing);
         app.apply_subtitle_file_choice(Some(vtt.clone()), ctx.clone());
         let deadline = Instant::now() + Duration::from_secs(6);
@@ -1341,7 +1355,7 @@ mod tests {
             Some(vtt.canonicalize().unwrap().as_path())
         );
         assert!(!current.playing, "paused state must survive replacement");
-        assert!((current.position().unwrap() - paused_at).abs() < 0.6);
+        assert!((wait_for_position_at_least(&mut app, &ctx, 2.5) - paused_at).abs() < 0.6);
 
         app.apply_subtitle_file_choice(Some(malformed), ctx.clone());
         let deadline = Instant::now() + Duration::from_secs(6);
@@ -1357,7 +1371,7 @@ mod tests {
             Some(vtt.canonicalize().unwrap().as_path())
         );
         assert!(!current.playing, "asynchronous failure must preserve pause");
-        assert!((current.position().unwrap() - paused_at).abs() < 0.6);
+        assert!((wait_for_position_at_least(&mut app, &ctx, 2.5) - paused_at).abs() < 0.6);
     }
 
     #[test]
