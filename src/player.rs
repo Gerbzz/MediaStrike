@@ -30,6 +30,7 @@ pub struct Player {
     subtitle_tracks: Vec<SubtitleTrack>,
     selected_non_text: Vec<String>,
     selected_subtitle: Option<String>,
+    subtitles_enabled: bool,
     streams_selected: bool,
     external_subtitle: Option<PathBuf>,
 }
@@ -109,6 +110,7 @@ impl Player {
             subtitle_tracks: Vec::new(),
             selected_non_text: Vec::new(),
             selected_subtitle: None,
+            subtitles_enabled: true,
             streams_selected: false,
             external_subtitle: external.map(|(path, _)| path),
         })
@@ -119,7 +121,11 @@ impl Player {
     }
 
     pub fn selected_subtitle(&self) -> Option<&str> {
-        self.selected_subtitle.as_deref()
+        if self.subtitles_enabled {
+            self.selected_subtitle.as_deref()
+        } else {
+            None
+        }
     }
 
     pub fn external_subtitle(&self) -> Option<&Path> {
@@ -139,10 +145,14 @@ impl Player {
                 return Err("This subtitle track is no longer available".to_owned());
             }
         }
+        let Some(id) = id else {
+            self.set_text_output(false)?;
+            self.subtitles_enabled = false;
+            return Ok(());
+        };
+        self.set_text_output(true)?;
         let mut ids = self.selected_non_text.clone();
-        if let Some(id) = id {
-            ids.push(id.to_owned());
-        }
+        ids.push(id.to_owned());
         let ids: Vec<_> = ids.iter().map(String::as_str).collect();
         if !self
             .pipeline
@@ -150,6 +160,21 @@ impl Player {
         {
             return Err("GStreamer did not accept the subtitle selection".to_owned());
         }
+        self.subtitles_enabled = true;
+        Ok(())
+    }
+
+    fn set_text_output(&self, enabled: bool) -> Result<(), String> {
+        let flags = self.pipeline.property_value("flags");
+        let class = gst::glib::FlagsClass::with_type(flags.type_())
+            .ok_or("GStreamer does not expose playback flags")?;
+        let changed = if enabled {
+            class.set_by_nick(flags, "text")
+        } else {
+            class.unset_by_nick(flags, "text")
+        }
+        .map_err(|_| "GStreamer cannot change subtitle output")?;
+        self.pipeline.set_property_from_value("flags", &changed);
         Ok(())
     }
 
@@ -383,6 +408,12 @@ mod tests {
     #[test]
     #[ignore = "requires a generated local AVI and SRT via PLAYSTRIKE_SUBTITLE_VIDEO and PLAYSTRIKE_SUBTITLE_SAMPLE"]
     fn discovers_and_switches_external_subtitle_track() {
+        fn text_output_enabled(player: &Player) -> bool {
+            let flags = player.pipeline.property_value("flags");
+            let class = gst::glib::FlagsClass::with_type(flags.type_()).unwrap();
+            class.is_set_by_nick(&flags, "text")
+        }
+
         gstreamer::init().expect("GStreamer runtime");
         let video = std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("subtitle video");
         let subtitle = std::env::var_os("PLAYSTRIKE_SUBTITLE_SAMPLE").expect("subtitle SRT");
@@ -415,6 +446,7 @@ mod tests {
             .id
             .clone();
         assert!(player.select_subtitle(Some("not-a-stream-id")).is_err());
+        assert!(text_output_enabled(&player));
 
         player.select_subtitle(None).expect("turn subtitles off");
         let off_deadline = Instant::now() + Duration::from_secs(2);
@@ -425,6 +457,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(player.selected_subtitle(), None);
+        assert!(!text_output_enabled(&player));
 
         player
             .select_subtitle(Some(&track))
@@ -437,6 +470,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(player.selected_subtitle(), Some(track.as_str()));
+        assert!(text_output_enabled(&player));
     }
 
     #[test]
