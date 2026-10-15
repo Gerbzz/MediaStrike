@@ -19,9 +19,9 @@
 
 ### MediaStrike subtitle preview
 
-![MediaStrike playing a synthetic local AVI with an external SRT caption](assets/screenshots/mediastrike-subtitles-srt-preview.png)
+![MediaStrike source c48564e playing a synthetic local AVI with an external SRT caption](assets/screenshots/mediastrike-subtitles-srt-c48564e.png)
 
-This [native renderer capture](docs/SUBTITLE_CAPTURE_PROVENANCE.md) shows a visible SRT caption from the isolated subtitle branch. A [WebVTT capture](assets/screenshots/mediastrike-subtitles-vtt-preview.png) from the same executable is also available. Both use synthetic local files. [Hosted follow-up tests](docs/SUBTITLE_FOLLOWUP_VERIFICATION.md) cover two embedded tracks, switching and Off, file choice while playing or paused, malformed files, and Repeat one. Native menu clicks still need hands-on review.
+These [fresh native renderer captures](docs/SUBTITLE_FINAL_CAPTURE_PROVENANCE.md) show visible [SRT](assets/screenshots/mediastrike-subtitles-srt-c48564e.png) and [WebVTT](assets/screenshots/mediastrike-subtitles-vtt-c48564e.png) captions from the verified follow-up source using synthetic local files. [Hosted follow-up tests](docs/SUBTITLE_FOLLOWUP_VERIFICATION.md) cover two embedded tracks, switching and Off, file choice while playing or paused, malformed files, Repeat one, and newer choices during a pending file load. Native menu clicks still need hands-on review; the [earlier captures](docs/SUBTITLE_CAPTURE_PROVENANCE.md) remain preserved.
 
 ### MediaStrike queue layout draft
 
