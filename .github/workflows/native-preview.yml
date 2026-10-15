@@ -1,0 +1,81 @@
+name: MediaStrike native preview
+
+on:
+  push:
+    branches: [codex/mediastrike-rename]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select stable Rust
+        shell: pwsh
+        run: rustup default stable
+      - name: Install official GStreamer MSVC SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = 'https://gstreamer.freedesktop.org/data/pkg/windows/1.26.11/msvc'
+          $files = @(
+            'gstreamer-1.0-msvc-x86_64-1.26.11.msi',
+            'gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi'
+          )
+          foreach ($file in $files) {
+            $url = "$base/$file"
+            $head = Invoke-WebRequest -Uri $url -Method Head -TimeoutSec 60
+            $size = [int64]($head.Headers['Content-Length'] | Select-Object -First 1)
+            if ($size -lt 1 -or $size -gt 400MB) {
+              throw "GStreamer installer outside 1-400 MiB cap: $file ($size bytes)"
+            }
+            $path = Join-Path $env:RUNNER_TEMP $file
+            Invoke-WebRequest -Uri $url -OutFile $path -TimeoutSec 600
+            if ((Get-Item $path).Length -ne $size) { throw "Incomplete GStreamer installer: $file" }
+            $process = Start-Process msiexec.exe -ArgumentList "/i `"$path`" /qn /norestart" -Wait -PassThru
+            if ($process.ExitCode -notin @(0, 3010)) { throw "GStreamer installer failed: $file ($($process.ExitCode))" }
+          }
+          $gst = @(
+            'C:\gstreamer\1.0\msvc_x86_64',
+            'C:\Program Files\gstreamer\1.0\msvc_x86_64'
+          ) | Where-Object { Test-Path (Join-Path $_ 'bin\pkg-config.exe') } | Select-Object -First 1
+          if (-not $gst) { throw 'GStreamer MSVC SDK was not found after installation' }
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gst" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG=$gst\bin\pkg-config.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "GST_PLUGIN_SYSTEM_PATH=$gst\lib\gstreamer-1.0" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "$gst\bin" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Test source
+        shell: pwsh
+        run: cargo test --locked -j 2
+      - name: Build native executable
+        shell: pwsh
+        run: cargo build --locked -j 2
+      - name: Bound and hash executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-Item target/debug/playstrike.exe
+          if ($exe.Length -gt 120MB) { throw "Executable exceeds 120 MiB cap: $($exe.Length)" }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "$sha  playstrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
+          "commit=$env:GITHUB_SHA" | Set-Content artifact/SOURCE.txt -Encoding ascii
+          "cargo_lock_sha256=$((Get-FileHash Cargo.lock -Algorithm SHA256).Hash)" | Add-Content artifact/SOURCE.txt -Encoding ascii
+          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha; source: $env:GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mediastrike-native-preview
+          path: |
+            target/debug/playstrike.exe
+            artifact/SHA256.txt
+            artifact/SOURCE.txt
+          if-no-files-found: error
+          retention-days: 1
