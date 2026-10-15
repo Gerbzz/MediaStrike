@@ -17,11 +17,17 @@
 
 ## Player preview
 
+### MediaStrike subtitle preview
+
+![MediaStrike playing a synthetic local AVI with an external SRT caption](assets/screenshots/mediastrike-subtitles-srt-preview.png)
+
+This [native renderer capture](docs/SUBTITLE_CAPTURE_PROVENANCE.md) shows a visible SRT caption from the isolated subtitle branch. A [WebVTT capture](assets/screenshots/mediastrike-subtitles-vtt-preview.png) from the same executable is also available. Both use synthetic local files. Track switching and Off passed the hosted player test; native menu clicks still need hands-on review.
+
 ### MediaStrike queue layout draft
 
 ![MediaStrike queue layout showing two synthetic local files and a decoded frame](assets/screenshots/mediastrike-queue-preview.png)
 
-This [native renderer capture](docs/QUEUE_CAPTURE_PROVENANCE.md) shows the current queue branch with two local files in its session queue. It verifies the visible layout and one decoded frame; hands-on transport and queue interaction still need review.
+This [earlier native renderer capture](docs/QUEUE_CAPTURE_PROVENANCE.md) shows the queue branch with two local files in its session queue. It verifies the visible layout and one decoded frame; hands-on transport and queue interaction still need review.
 
 ### Earlier MediaStrike draft interface
 
@@ -49,6 +55,10 @@ Add more local files without interrupting playback, select a queued file, filter
 
 Play and pause, seek with the bar or five-second steps, and adjust volume in the window. Keyboard shortcuts include **Space** for play/pause, **Left/Right** for seeking, **Alt+Left/Right** for previous/next file, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
 
+### Choose local subtitles
+
+Open the **Subtitles** menu in the transport rail to turn captions off, choose a discovered text track, or load a local `.srt` or `.vtt` file for the current media. Loading a file opens the current media again and attempts to restore its playback position and pause state. Track availability depends on GStreamer plugins and the file; the menu reports unsupported extensions, missing files, and selection errors. For a launch-time subtitle, use `--subtitle path\to\captions.srt` after the media path. The file applies to the first opened item, not every item in the session queue. Subtitle styling, offset adjustment, and saved associations remain future work.
+
 ### Decode with the installed GStreamer runtime
 
 GStreamer supplies decoding and playback. Format support depends on the installed plugins and their licenses. The current video path copies decoded RGBA frames into an egui texture and limits preview to 4096×2160; CPU and memory costs for large videos still need measurement. Hardware decoding may be chosen by GStreamer, but presentation is not zero-copy.
@@ -66,6 +76,8 @@ $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 = $gst
 $env:GST_PLUGIN_SYSTEM_PATH = "$gst\lib\gstreamer-1.0"
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
 cargo run --locked -- path\to\first.mp4 path\to\second.mp4
+# To attach subtitles to the first item:
+cargo run --locked -- path\to\first.mp4 --subtitle path\to\captions.srt
 ```
 
 Omit the media path to choose or drop a file in the window. Add `--offline` to Cargo after dependencies are cached. Check disk headroom before building and follow [VERIFY.md](VERIFY.md) for the remaining native review.

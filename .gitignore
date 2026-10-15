@@ -2,3 +2,6 @@
 /verification/*.webm
 /verification/*.avi
 /verification/*.png
+/verification/*.srt
+/verification/*.vtt
+/verification/hosted-*/

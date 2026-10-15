@@ -10,7 +10,7 @@ The feature groups below come from VideoLAN's [desktop basic usage](https://docs
 | Playlist and library | Rust-managed session queue, selection, and optional right panel | Two queued test files are visible in the native capture. No saved playlists, media scanning, sort, reorder, metadata index, or persistent library yet; queue filtering exists but has not had an interactive review. |
 | Video presentation | Decoded frames copied to an egui texture, bounded to 4096 x 2160 | No fullscreen control, snapshot command, aspect/crop, deinterlace, HDR, 360-degree display, or measured large-video performance. |
 | Audio | GStreamer audio sink and volume control | No track/output selection, equalizer, visualization, effects, or verified audible playback. |
-| Subtitles | No explicit controls | Embedded/external subtitle selection, styling, and synchronization remain. |
+| Subtitles | playbin3 text-stream discovery and selection; Subtitles menu with Off/track choices and local `.srt`/`.vtt` file picker or launch option | A hosted Windows test discovered an external SRT track, selected it, turned GStreamer's text output off, and restored it. Source-bound native captures visibly rendered synthetic SRT and WebVTT captions. Embedded multi-track files, native menu clicks, styling, offset/synchronization, and format breadth remain unverified. |
 | Navigation | File queue and time seek | Bookmarks, chapters, titles, programs, and recent media remain. |
 | Sources | Local files only | Network streams, discs, capture devices, and optical media remain. |
 | Creation and streaming | None | Recording, conversion/transcoding, stream output, and remote control remain. |
