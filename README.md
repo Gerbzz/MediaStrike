@@ -17,9 +17,17 @@
 
 ## Player preview
 
+### MediaStrike draft interface
+
+![MediaStrike draft showing a decoded frame from a synthetic local AVI](assets/screenshots/mediastrike-draft-player-2026-10-15.png)
+
+This [app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame in the native Windows player. Transport interaction and audible output still need hands-on review.
+
+### Historical PlayStrike interface
+
 ![Historical PlayStrike capture showing a decoded frame from a synthetic local WebM](assets/screenshots/playstrike-player.png)
 
-This [app-rendered capture](docs/SCREENSHOT_PROVENANCE.md) shows a first-party two-second test pattern from the same player before the MediaStrike rename. It is a historical PlayStrike view, not a capture of the current MediaStrike interface. Transport interaction and audible output still need hands-on review.
+The [earlier PlayStrike capture](docs/SCREENSHOT_PROVENANCE.md) remains here for comparison.
 
 ## The player
 
@@ -56,7 +64,7 @@ The executable and Cargo package are still named `playstrike` so existing launch
 
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer. A hosted Windows build, two unit tests, and a GStreamer playback test with a small uncompressed AVI have passed on the rename branch. The historical screenshot verifies one decoded synthetic video frame in the prior interface; a current MediaStrike screenshot is still pending. Interactive transport behavior in a visible window, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer. A hosted Windows build, two unit tests, and a GStreamer playback test with a small uncompressed AVI passed on the rename branch. The new screenshot verifies one decoded synthetic video frame in the MediaStrike draft; the historical screenshot records the earlier PlayStrike interface. Interactive transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
 The original [lyrebird artwork](assets/branding) is included in the start view and About panel; native app-icon integration remains pending. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
