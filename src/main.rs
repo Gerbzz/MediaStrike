@@ -4,6 +4,7 @@ mod queue;
 use eframe::egui;
 use player::Player;
 use queue::MediaQueue;
+use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -49,7 +50,7 @@ struct MediaStrike {
 impl MediaStrike {
     fn new(
         cc: &eframe::CreationContext<'_>,
-        media_path: Option<PathBuf>,
+        media_paths: Vec<PathBuf>,
         capture: Option<CaptureOnce>,
     ) -> Self {
         let (gst_ready, error) = match gstreamer::init() {
@@ -61,6 +62,9 @@ impl MediaStrike {
         visuals.window_fill = egui::Color32::from_rgb(29, 29, 29);
         visuals.selection.bg_fill = egui::Color32::from_rgb(180, 82, 11);
         visuals.hyperlink_color = egui::Color32::from_rgb(255, 147, 47);
+        visuals.override_text_color = Some(egui::Color32::from_rgb(224, 224, 224));
+        visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_rgb(224, 224, 224);
+        visuals.widgets.inactive.fg_stroke.color = egui::Color32::from_rgb(218, 218, 218);
         cc.egui_ctx.set_theme(egui::Theme::Dark);
         cc.egui_ctx.set_visuals(visuals);
         let mut app = Self {
@@ -78,10 +82,8 @@ impl MediaStrike {
             gst_ready,
             capture,
         };
-        if app.gst_ready {
-            if let Some(path) = media_path {
-                app.enqueue_media(vec![path], true, cc.egui_ctx.clone());
-            }
+        if app.gst_ready && !media_paths.is_empty() {
+            app.enqueue_media(media_paths, true, cc.egui_ctx.clone());
         }
         app
     }
@@ -652,21 +654,51 @@ fn format_time(seconds: f64) -> String {
     }
 }
 
-fn main() -> ExitCode {
-    let mut args = std::env::args_os().skip(1);
-    let media_path = args.next().map(PathBuf::from);
-    let capture_path = match (args.next(), args.next(), args.next()) {
-        (None, None, None) => None,
-        (Some(flag), Some(output), None) if flag == "--capture" && media_path.is_some() => {
+struct LaunchArgs {
+    media_paths: Vec<PathBuf>,
+    capture_path: Option<PathBuf>,
+}
+
+fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchArgs, String> {
+    let mut args = args.into_iter().peekable();
+    let mut media_paths = Vec::new();
+    let mut capture_path = None;
+    while let Some(arg) = args.next() {
+        if arg == "--capture" {
+            let Some(output) = args.next() else {
+                return Err("--capture requires a new PNG path".to_owned());
+            };
+            if media_paths.is_empty() || args.peek().is_some() {
+                return Err("--capture must follow one or more media files".to_owned());
+            }
             let path = PathBuf::from(output);
             if path.extension().is_none_or(|ext| ext != "png") {
-                eprintln!("Capture path must end in .png");
-                return ExitCode::FAILURE;
+                return Err("Capture path must end in .png".to_owned());
             }
-            Some(path)
+            capture_path = Some(path);
+        } else {
+            media_paths.push(PathBuf::from(arg));
+            if media_paths.len() > queue::MAX_QUEUE_ITEMS {
+                return Err("Too many files for the session queue".to_owned());
+            }
         }
-        _ => {
-            eprintln!("MediaStrike usage: playstrike [MEDIA_FILE [--capture FILE.png]]");
+    }
+    Ok(LaunchArgs {
+        media_paths,
+        capture_path,
+    })
+}
+
+fn main() -> ExitCode {
+    let LaunchArgs {
+        media_paths,
+        capture_path,
+    } = match parse_launch_args(std::env::args_os().skip(1)) {
+        Ok(args) => args,
+        Err(error) => {
+            eprintln!(
+                "{error}\nMediaStrike usage: playstrike [MEDIA_FILE ...] [--capture FILE.png]"
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -684,7 +716,7 @@ fn main() -> ExitCode {
     match eframe::run_native(
         "MediaStrike",
         options,
-        Box::new(move |cc| Ok(Box::new(MediaStrike::new(cc, media_path, capture)))),
+        Box::new(move |cc| Ok(Box::new(MediaStrike::new(cc, media_paths, capture)))),
     ) {
         Ok(()) => match capture_result {
             None => ExitCode::SUCCESS,
@@ -709,11 +741,29 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::format_time;
+    use super::{format_time, parse_launch_args};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
 
     #[test]
     fn time_label_handles_long_media() {
         assert_eq!(format_time(65.9), "1:05");
         assert_eq!(format_time(3661.0), "1:01:01");
+    }
+
+    #[test]
+    fn accepts_multiple_local_files_before_capture_option() {
+        let args = ["first.avi", "second.avi", "--capture", "new.png"]
+            .into_iter()
+            .map(OsString::from);
+        let parsed = parse_launch_args(args).expect("valid multi-file launch");
+        assert_eq!(
+            parsed.media_paths,
+            [PathBuf::from("first.avi"), PathBuf::from("second.avi")]
+        );
+        assert_eq!(parsed.capture_path, Some(PathBuf::from("new.png")));
+        assert!(
+            parse_launch_args([OsString::from("--capture"), OsString::from("new.png")]).is_err()
+        );
     }
 }
