@@ -13,6 +13,32 @@ use std::time::{Duration, Instant};
 
 const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(174, 174, 174);
 
+#[derive(Default, Debug, PartialEq, Eq)]
+struct PlayerShortcuts {
+    open_files: bool,
+    toggle: bool,
+    back: bool,
+    forward: bool,
+    previous: bool,
+    next: bool,
+}
+
+fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
+    // Read shortcuts after TextEdit has processed this frame. This also catches
+    // the first click into Filter queue when a key arrives in the same frame.
+    if ctx.wants_keyboard_input() {
+        return PlayerShortcuts::default();
+    }
+    ctx.input(|input| PlayerShortcuts {
+        open_files: input.modifiers.command && input.key_pressed(egui::Key::O),
+        toggle: input.key_pressed(egui::Key::Space),
+        back: !input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
+        forward: !input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
+        previous: input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
+        next: input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
+    })
+}
+
 struct CaptureOnce {
     path: PathBuf,
     outcome: Arc<Mutex<Option<Result<(), String>>>>,
@@ -329,35 +355,7 @@ impl eframe::App for MediaStrike {
             self.enqueue_media(dropped, true, ctx.clone());
         }
 
-        let open_shortcut =
-            ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::O));
-        let mut pick_files = open_shortcut.then_some(true);
-        if self.player.is_some() {
-            let (toggle, back, forward, previous, next) = ctx.input(|input| {
-                (
-                    input.key_pressed(egui::Key::Space),
-                    !input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
-                    !input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
-                    input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
-                    input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
-                )
-            });
-            if toggle {
-                self.toggle();
-            }
-            if back {
-                self.skip(-5.0);
-            }
-            if forward {
-                self.skip(5.0);
-            }
-            if previous {
-                self.previous_track(ctx.clone());
-            }
-            if next {
-                self.next_track(ctx.clone());
-            }
-        }
+        let mut pick_files = None;
 
         egui::TopBottomPanel::top("identity")
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
@@ -620,6 +618,36 @@ impl eframe::App for MediaStrike {
                 });
         }
 
+        let shortcuts = player_shortcuts(ctx);
+        if shortcuts.open_files && pick_files.is_none() {
+            pick_files = Some(true);
+        }
+        if self.player.is_some() {
+            if shortcuts.toggle {
+                self.toggle();
+            }
+            if shortcuts.back {
+                self.skip(-5.0);
+            }
+            if shortcuts.forward {
+                self.skip(5.0);
+            }
+            if shortcuts.previous {
+                self.previous_track(ctx.clone());
+            }
+            if shortcuts.next {
+                self.next_track(ctx.clone());
+            }
+            if shortcuts.toggle
+                || shortcuts.back
+                || shortcuts.forward
+                || shortcuts.previous
+                || shortcuts.next
+            {
+                ctx.request_repaint();
+            }
+        }
+
         if let Some(play_new) = pick_files {
             if let Some(paths) = rfd::FileDialog::new().pick_files() {
                 self.enqueue_media(paths, play_new, ctx.clone());
@@ -743,9 +771,104 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_time, parse_launch_args};
+    use super::{PlayerShortcuts, format_time, parse_launch_args, player_shortcuts};
+    use eframe::egui;
     use std::ffi::OsString;
     use std::path::PathBuf;
+
+    fn shortcut_key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn filter_frame(
+        ctx: &egui::Context,
+        filter: &mut String,
+        events: Vec<egui::Event>,
+    ) -> (egui::Rect, bool, PlayerShortcuts) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 200.0),
+            )),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let mut rect = egui::Rect::NOTHING;
+        let mut focused = false;
+        let mut shortcuts = PlayerShortcuts::default();
+        ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let response = ui.add(egui::TextEdit::singleline(filter).hint_text("Filter queue"));
+                rect = response.rect;
+                focused = response.has_focus();
+            });
+            shortcuts = player_shortcuts(ctx);
+        });
+        (rect, focused, shortcuts)
+    }
+
+    #[test]
+    fn queue_filter_owns_shortcuts_on_first_click_and_while_typing() {
+        let ctx = egui::Context::default();
+        let mut filter = String::new();
+        let (rect, focused, _) = filter_frame(&ctx, &mut filter, vec![]);
+        assert!(!focused);
+
+        let position = rect.center();
+        let click = |pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let (_, focused, shortcuts) = filter_frame(
+            &ctx,
+            &mut filter,
+            vec![
+                egui::Event::PointerMoved(position),
+                click(true),
+                click(false),
+                shortcut_key(egui::Key::Space, egui::Modifiers::NONE),
+            ],
+        );
+        assert!(focused, "first click should focus the queue filter");
+        assert_eq!(shortcuts, PlayerShortcuts::default());
+
+        let (_, focused, shortcuts) = filter_frame(
+            &ctx,
+            &mut filter,
+            vec![
+                egui::Event::Text("sample".to_owned()),
+                shortcut_key(egui::Key::ArrowLeft, egui::Modifiers::NONE),
+                shortcut_key(
+                    egui::Key::ArrowRight,
+                    egui::Modifiers {
+                        alt: true,
+                        ..Default::default()
+                    },
+                ),
+            ],
+        );
+        assert!(focused, "typing should keep the queue filter focused");
+        assert!(filter.contains("sample"));
+        assert_eq!(shortcuts, PlayerShortcuts::default());
+
+        let other = egui::Context::default();
+        let (_, focused, shortcuts) = filter_frame(
+            &other,
+            &mut String::new(),
+            vec![shortcut_key(egui::Key::Space, egui::Modifiers::NONE)],
+        );
+        assert!(!focused, "no text field should own keyboard focus yet");
+        assert!(shortcuts.toggle, "Space should toggle outside text fields");
+    }
 
     #[test]
     fn time_label_handles_long_media() {
