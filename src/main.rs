@@ -376,10 +376,21 @@ impl eframe::App for MediaStrike {
                         if let Some(texture) = &self.brand_texture {
                             ui.image((texture.id(), egui::vec2(112.0, 112.0)));
                         }
-                        ui.heading("MediaStrike");
-                        ui.label(egui::RichText::new("by PWDS").weak());
-                        ui.add_space(12.0);
-                        ui.label("Drop a video or audio file here, or choose Open file.");
+                        if let Some(player) = &self.player {
+                            ui.heading("Now playing");
+                            ui.label(file_label(&player.path));
+                        } else {
+                            ui.heading("MediaStrike");
+                            ui.label(egui::RichText::new("by PWDS").weak());
+                            ui.add_space(12.0);
+                            ui.label("Drop a video or audio file here");
+                            if ui
+                                .add_enabled(self.gst_ready, egui::Button::new("Open file"))
+                                .clicked()
+                            {
+                                pick_file = true;
+                            }
+                        }
                     });
                 }
             });

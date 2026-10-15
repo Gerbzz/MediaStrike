@@ -59,31 +59,6 @@ jobs:
           $env:GST_AUDIOSINK = 'fakesink'
           cargo test --locked -j 2 decodes_and_controls_local_audio_video -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Headless playback test failed' }
-      - name: Attempt app-rendered screenshot
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force artifact | Out-Null
-          $sample = Join-Path $env:RUNNER_TEMP 'mediastrike-sample.avi'
-          $capture = Join-Path (Get-Location) 'artifact\mediastrike-native.png'
-          $env:GST_AUDIOSINK = 'fakesink'
-          try {
-            $process = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList @("`"$sample`"", '--capture', "`"$capture`"") -PassThru
-            if (-not $process.WaitForExit(30000)) {
-              Stop-Process -Id $process.Id -Force
-              Write-Warning 'Native capture timed out on the hosted runner'
-            } elseif ($process.ExitCode -ne 0) {
-              Write-Warning "Native capture exited with code $($process.ExitCode) on the hosted runner"
-            }
-          } catch {
-            Write-Warning "Native capture unavailable on the hosted runner: $($_.Exception.Message)"
-          }
-          if (Test-Path $capture) {
-            if ((Get-Item $capture).Length -gt 5MB) { throw 'Native screenshot exceeds 5 MiB cap' }
-            $sha = (Get-FileHash $capture -Algorithm SHA256).Hash
-            "$sha  mediastrike-native.png" | Set-Content artifact/SCREENSHOT_SHA256.txt -Encoding ascii
-            Write-Output "Native screenshot SHA-256: $sha"
-          }
       - name: Bound and hash executable
         shell: pwsh
         run: |
@@ -103,7 +78,5 @@ jobs:
             target/debug/playstrike.exe
             artifact/SHA256.txt
             artifact/SOURCE.txt
-            artifact/mediastrike-native.png
-            artifact/SCREENSHOT_SHA256.txt
           if-no-files-found: error
           retention-days: 1

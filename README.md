@@ -56,7 +56,7 @@ The executable and Cargo package are still named `playstrike` so existing launch
 
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer. Offline unit tests and a headless GStreamer playback test passed before the rename. The historical screenshot verifies one decoded synthetic video frame in the prior interface. The MediaStrike branding has not yet had a native build or screenshot review. Interactive transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer. A hosted Windows build, two unit tests, and a GStreamer playback test with a small uncompressed AVI have passed on the rename branch. The historical screenshot verifies one decoded synthetic video frame in the prior interface; a current MediaStrike screenshot is still pending. Interactive transport behavior in a visible window, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
 The original [lyrebird artwork](assets/branding) is included in the start view and About panel; native app-icon integration remains pending. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
