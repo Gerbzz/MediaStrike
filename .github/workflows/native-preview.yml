@@ -101,6 +101,8 @@ jobs:
           $env:PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO = $embedded
           cargo test --locked -j 2 discovers_switches_and_disables_two_embedded_tracks -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Embedded subtitle selection test failed' }
+          cargo test --locked -j 2 pending_subtitle_choice_ -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'Pending subtitle choice test failed' }
           cargo test --locked -j 2 repeat_one_keeps_external_and_embedded_subtitle_choices -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Repeat-one subtitle continuity test failed' }
       - name: Bound and hash executable

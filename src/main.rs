@@ -211,6 +211,22 @@ impl MediaStrike {
         }
     }
 
+    fn choose_subtitle(&mut self, choice: Option<&str>) {
+        if let Some(player) = &mut self.player {
+            match player.select_subtitle(choice) {
+                Ok(()) => {
+                    self.error = None;
+                    self.status = if choice.is_some() {
+                        "Switching subtitle track".to_owned()
+                    } else {
+                        "Turning subtitles off".to_owned()
+                    };
+                }
+                Err(error) => self.error = Some(error),
+            }
+        }
+    }
+
     fn refresh_pending_subtitle(&mut self, ctx: &egui::Context) {
         let Some(mut pending) = self.pending_subtitle_load.take() else {
             return;
@@ -678,19 +694,7 @@ impl eframe::App for MediaStrike {
             self.next_track(ctx.clone());
         }
         if let Some(choice) = subtitle_choice {
-            if let Some(player) = &mut self.player {
-                match player.select_subtitle(choice.as_deref()) {
-                    Ok(()) => {
-                        self.error = None;
-                        self.status = if choice.is_some() {
-                            "Switching subtitle track".to_owned()
-                        } else {
-                            "Turning subtitles off".to_owned()
-                        };
-                    }
-                    Err(error) => self.error = Some(error),
-                }
-            }
+            self.choose_subtitle(choice.as_deref());
         }
 
         egui::SidePanel::left("navigation")
@@ -1048,6 +1052,43 @@ mod tests {
         panic!("position did not reach {minimum} seconds");
     }
 
+    fn two_track_app(ctx: &egui::Context) -> (MediaStrike, String) {
+        let embedded = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO").expect("two-track MKV"),
+        );
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![embedded], true, ctx.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && (!app.player.as_ref().unwrap().subtitle_selection_ready()
+                || app.player.as_ref().unwrap().subtitle_tracks().len() < 2)
+        {
+            app.refresh_player(ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let tracks = app.player.as_ref().unwrap().subtitle_tracks();
+        assert_eq!(tracks.len(), 2, "fixture must expose both embedded tracks");
+        let second = tracks[1].id.clone();
+        (app, second)
+    }
+
+    fn wait_for_pending_subtitle(app: &mut MediaStrike, ctx: &egui::Context) {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline && app.pending_subtitle_load.is_some() {
+            app.refresh_player(ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            app.pending_subtitle_load.is_none(),
+            "subtitle load did not settle"
+        );
+        assert!(
+            app.error.is_none(),
+            "subtitle choice failed: {:?}",
+            app.error
+        );
+    }
+
     fn shortcut_key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
@@ -1395,6 +1436,50 @@ mod tests {
         );
         assert!(!current.playing, "asynchronous failure must preserve pause");
         assert!((wait_for_position_at_least(&mut app, &ctx, 2.5) - paused_at).abs() < 0.6);
+    }
+
+    #[test]
+    #[ignore = "requires generated two-track Matroska and SRT fixture environment variables"]
+    fn pending_subtitle_choice_off_survives() {
+        gstreamer::init().expect("GStreamer runtime");
+        let srt = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_SAMPLE").expect("SRT"));
+        let ctx = egui::Context::default();
+        let (mut app, _) = two_track_app(&ctx);
+
+        app.apply_subtitle_file_choice(Some(srt), ctx.clone());
+        assert!(app.pending_subtitle_load.is_some());
+        app.choose_subtitle(None);
+        assert!(app.error.is_none());
+
+        wait_for_pending_subtitle(&mut app, &ctx);
+        assert_eq!(app.player.as_ref().unwrap().selected_subtitle(), None);
+    }
+
+    #[test]
+    #[ignore = "requires generated two-track Matroska and SRT fixture environment variables"]
+    fn pending_subtitle_choice_other_track_survives() {
+        gstreamer::init().expect("GStreamer runtime");
+        let srt = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_SAMPLE").expect("SRT"));
+        let ctx = egui::Context::default();
+        let (mut app, second) = two_track_app(&ctx);
+
+        app.apply_subtitle_file_choice(Some(srt), ctx.clone());
+        assert!(app.pending_subtitle_load.is_some());
+        app.choose_subtitle(Some(&second));
+        assert!(app.error.is_none());
+
+        wait_for_pending_subtitle(&mut app, &ctx);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline
+            && app.player.as_ref().unwrap().selected_subtitle() != Some(second.as_str())
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            app.player.as_ref().unwrap().selected_subtitle(),
+            Some(second.as_str())
+        );
     }
 
     #[test]
