@@ -61,6 +61,7 @@ impl MediaStrike {
         visuals.window_fill = egui::Color32::from_rgb(29, 29, 29);
         visuals.selection.bg_fill = egui::Color32::from_rgb(180, 82, 11);
         visuals.hyperlink_color = egui::Color32::from_rgb(255, 147, 47);
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
         cc.egui_ctx.set_visuals(visuals);
         let mut app = Self {
             player: None,
