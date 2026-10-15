@@ -41,8 +41,8 @@ jobs:
             $part = "$path.part"
             $output = [System.IO.File]::Open($path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
             try {
-              for ([int64]$offset = 0; $offset -lt $size; $offset += 4MB) {
-                $end = [Math]::Min($offset + 4MB - 1, $size - 1)
+              for ([int64]$offset = 0; $offset -lt $size; $offset += 1MB) {
+                $end = [Math]::Min($offset + 1MB - 1, $size - 1)
                 $downloaded = $false
                 for ($attempt = 1; $attempt -le 3; $attempt++) {
                   try {
