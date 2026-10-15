@@ -28,9 +28,11 @@ impl CaptureOnce {
     }
 }
 
-struct PlayStrike {
+struct MediaStrike {
     player: Option<Player>,
     texture: Option<egui::TextureHandle>,
+    brand_texture: Option<egui::TextureHandle>,
+    show_about: bool,
     seek_preview: Option<f64>,
     volume: f64,
     status: String,
@@ -39,7 +41,7 @@ struct PlayStrike {
     capture: Option<CaptureOnce>,
 }
 
-impl PlayStrike {
+impl MediaStrike {
     fn new(
         cc: &eframe::CreationContext<'_>,
         media_path: Option<PathBuf>,
@@ -53,6 +55,8 @@ impl PlayStrike {
         let mut app = Self {
             player: None,
             texture: None,
+            brand_texture: load_brand_texture(&cc.egui_ctx),
+            show_about: false,
             seek_preview: None,
             volume: 0.8,
             status: "Open or drop a local media file".to_owned(),
@@ -122,7 +126,7 @@ impl PlayStrike {
                     texture.set(image, egui::TextureOptions::LINEAR);
                 } else {
                     self.texture = Some(ctx.load_texture(
-                        "playstrike-video",
+                        "mediastrike-video",
                         image,
                         egui::TextureOptions::LINEAR,
                     ));
@@ -230,7 +234,7 @@ impl PlayStrike {
     }
 }
 
-impl eframe::App for PlayStrike {
+impl eframe::App for MediaStrike {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.refresh_player(ctx);
         let dropped = ctx.input(|input| {
@@ -269,13 +273,15 @@ impl eframe::App for PlayStrike {
         egui::TopBottomPanel::top("identity").show(ctx, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.heading("PlayStrike");
-                ui.label(egui::RichText::new("by PWDS").weak());
                 if let Some(player) = &self.player {
-                    ui.separator();
                     ui.label(file_label(&player.path));
+                } else {
+                    ui.label(egui::RichText::new("Local media player").weak());
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("About").clicked() {
+                        self.show_about = true;
+                    }
                     if ui
                         .add_enabled(self.gst_ready, egui::Button::new("Open file…"))
                         .clicked()
@@ -365,15 +371,35 @@ impl eframe::App for PlayStrike {
                         ui.image((texture.id(), size));
                     });
                 } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.label(
-                            egui::RichText::new("Drop a video or audio file here")
-                                .size(23.0)
-                                .weak(),
-                        );
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(((ui.available_height() - 220.0) / 2.0).max(0.0));
+                        if let Some(texture) = &self.brand_texture {
+                            ui.image((texture.id(), egui::vec2(112.0, 112.0)));
+                        }
+                        ui.heading("MediaStrike");
+                        ui.label(egui::RichText::new("by PWDS").weak());
+                        ui.add_space(12.0);
+                        ui.label("Drop a video or audio file here, or choose Open file.");
                     });
                 }
             });
+
+        if self.show_about {
+            egui::Window::new("About MediaStrike")
+                .open(&mut self.show_about)
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        if let Some(texture) = &self.brand_texture {
+                            ui.image((texture.id(), egui::vec2(96.0, 96.0)));
+                        }
+                        ui.heading("MediaStrike");
+                        ui.label("A local media player by PWDS");
+                        ui.label(egui::RichText::new("Version 0.1.0").weak());
+                    });
+                });
+        }
 
         if pick_file {
             if let Some(path) = rfd::FileDialog::new().pick_file() {
@@ -388,6 +414,17 @@ fn file_label(path: &std::path::Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+fn load_brand_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let rgba = image::load_from_memory(include_bytes!(
+        "../assets/branding/playstrike-lyrebird-icon.png"
+    ))
+    .ok()?
+    .into_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture("mediastrike-brand", image, egui::TextureOptions::LINEAR))
 }
 
 fn format_time(seconds: f64) -> String {
@@ -414,7 +451,7 @@ fn main() -> ExitCode {
             Some(path)
         }
         _ => {
-            eprintln!("Usage: playstrike [MEDIA_FILE [--capture FILE.png]]");
+            eprintln!("MediaStrike usage: playstrike [MEDIA_FILE [--capture FILE.png]]");
             return ExitCode::FAILURE;
         }
     };
@@ -426,30 +463,30 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1120.0, 720.0])
             .with_min_inner_size([640.0, 400.0])
-            .with_title("PlayStrike"),
+            .with_title("MediaStrike"),
         ..Default::default()
     };
     match eframe::run_native(
-        "PlayStrike",
+        "MediaStrike",
         options,
-        Box::new(move |cc| Ok(Box::new(PlayStrike::new(cc, media_path, capture)))),
+        Box::new(move |cc| Ok(Box::new(MediaStrike::new(cc, media_path, capture)))),
     ) {
         Ok(()) => match capture_result {
             None => ExitCode::SUCCESS,
             Some(result) => match result.lock().unwrap().take() {
                 Some(Ok(())) => ExitCode::SUCCESS,
                 Some(Err(error)) => {
-                    eprintln!("PlayStrike capture: {error}");
+                    eprintln!("MediaStrike capture: {error}");
                     ExitCode::FAILURE
                 }
                 None => {
-                    eprintln!("PlayStrike capture: window closed before screenshot completed");
+                    eprintln!("MediaStrike capture: window closed before screenshot completed");
                     ExitCode::FAILURE
                 }
             },
         },
         Err(error) => {
-            eprintln!("PlayStrike window: {error}");
+            eprintln!("MediaStrike window: {error}");
             ExitCode::FAILURE
         }
     }

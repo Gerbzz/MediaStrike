@@ -2,7 +2,7 @@
 name = "playstrike"
 version = "0.1.0"
 edition = "2024"
-description = "A local media player in the Strike suite by PWDS"
+description = "MediaStrike, a local media player in the Strike suite by PWDS"
 license = "MIT"
 
 [dependencies]

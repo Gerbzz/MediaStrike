@@ -1,4 +1,6 @@
-# PlayStrike player screenshot provenance
+# Historical PlayStrike player screenshot provenance
+
+This screenshot predates the MediaStrike rename. It is retained as evidence of the earlier interface and should not be presented as a current MediaStrike capture.
 
 `assets/screenshots/playstrike-player.png` is a genuine 1120 x 720 screenshot returned by PlayStrike's egui/eframe Glow renderer on 14 October 2026 UTC. It shows the native player, a decoded frame, seek bar, transport controls, status, and filename. The local input was a self-generated two-second, 35,038-byte WebM with a test-pattern ball video and quiet synthetic tone. It contains no user media or client asset and was not uploaded.
 
