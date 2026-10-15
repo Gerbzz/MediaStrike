@@ -11,6 +11,8 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(174, 174, 174);
+
 struct CaptureOnce {
     path: PathBuf,
     outcome: Arc<Mutex<Option<Result<(), String>>>>,
@@ -368,9 +370,9 @@ impl eframe::App for MediaStrike {
                     ui.label(egui::RichText::new("MediaStrike").strong().size(17.0));
                     ui.separator();
                     if let Some(player) = &self.player {
-                        ui.label(egui::RichText::new(file_label(&player.path)).weak());
+                        ui.label(egui::RichText::new(file_label(&player.path)).color(MUTED_TEXT));
                     } else {
-                        ui.label(egui::RichText::new("Your media, in one place").weak());
+                        ui.label(egui::RichText::new("Your media, in one place").color(MUTED_TEXT));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("About").clicked() {
@@ -469,7 +471,7 @@ impl eframe::App for MediaStrike {
                 } else {
                     ui.label("Open or drop local media to start playback");
                 }
-                ui.label(egui::RichText::new(&self.status).weak());
+                ui.label(egui::RichText::new(&self.status).color(MUTED_TEXT));
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(255, 153, 127), error);
                 }
@@ -489,7 +491,7 @@ impl eframe::App for MediaStrike {
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(27, 27, 27)))
             .show(ctx, |ui| {
                 ui.add_space(14.0);
-                ui.label(egui::RichText::new("YOUR MEDIA").weak().small());
+                ui.label(egui::RichText::new("YOUR MEDIA").color(MUTED_TEXT).small());
                 ui.add_space(12.0);
                 if ui
                     .selectable_label(!self.show_queue, "Now playing")
@@ -506,7 +508,7 @@ impl eframe::App for MediaStrike {
                 ui.separator();
                 ui.label(
                     egui::RichText::new(format!("{} local file(s)", self.queue.items().len()))
-                        .weak(),
+                        .color(MUTED_TEXT),
                 );
             });
 
@@ -532,7 +534,7 @@ impl eframe::App for MediaStrike {
                             "{} items in this session",
                             self.queue.items().len()
                         ))
-                        .weak(),
+                        .color(MUTED_TEXT),
                     );
                     ui.add_space(8.0);
                     ui.add(
@@ -587,7 +589,7 @@ impl eframe::App for MediaStrike {
                             ui.label(file_label(&player.path));
                         } else {
                             ui.heading("MediaStrike");
-                            ui.label(egui::RichText::new("by PWDS").weak());
+                            ui.label(egui::RichText::new("by PWDS").color(MUTED_TEXT));
                             ui.add_space(12.0);
                             ui.label("Drop local video or audio files here");
                             if ui
@@ -613,7 +615,7 @@ impl eframe::App for MediaStrike {
                         }
                         ui.heading("MediaStrike");
                         ui.label("A local media player by PWDS");
-                        ui.label(egui::RichText::new("Version 0.1.0").weak());
+                        ui.label(egui::RichText::new("Version 0.1.0").color(MUTED_TEXT));
                     });
                 });
         }
