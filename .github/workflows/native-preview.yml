@@ -37,7 +37,8 @@ jobs:
               throw "GStreamer installer outside 1-400 MiB cap: $file ($size bytes)"
             }
             $path = Join-Path $env:RUNNER_TEMP $file
-            Invoke-WebRequest -Uri $url -OutFile $path -TimeoutSec 600
+            & curl.exe --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --max-time 600 --output $path $url
+            if ($LASTEXITCODE -ne 0) { throw "Could not download GStreamer installer: $file" }
             if ((Get-Item $path).Length -ne $size) { throw "Incomplete GStreamer installer: $file" }
             $process = Start-Process msiexec.exe -ArgumentList "/i `"$path`" /qn /norestart" -Wait -PassThru
             if ($process.ExitCode -notin @(0, 3010)) { throw "GStreamer installer failed: $file ($($process.ExitCode))" }
