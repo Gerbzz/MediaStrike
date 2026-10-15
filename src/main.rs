@@ -13,6 +13,32 @@ use std::time::{Duration, Instant};
 
 const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(174, 174, 174);
 
+#[derive(Default, Debug, PartialEq, Eq)]
+struct PlayerShortcuts {
+    open_files: bool,
+    toggle: bool,
+    back: bool,
+    forward: bool,
+    previous: bool,
+    next: bool,
+}
+
+fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
+    // Read shortcuts after TextEdit has processed this frame. This also catches
+    // the first click into Filter queue when a key arrives in the same frame.
+    if ctx.wants_keyboard_input() {
+        return PlayerShortcuts::default();
+    }
+    ctx.input(|input| PlayerShortcuts {
+        open_files: input.modifiers.command && input.key_pressed(egui::Key::O),
+        toggle: input.key_pressed(egui::Key::Space),
+        back: !input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
+        forward: !input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
+        previous: input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
+        next: input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
+    })
+}
+
 struct CaptureOnce {
     path: PathBuf,
     outcome: Arc<Mutex<Option<Result<(), String>>>>,
@@ -174,12 +200,15 @@ impl MediaStrike {
 
     fn skip(&mut self, delta: f64) {
         if let Some(player) = &self.player {
-            let current = player.position().unwrap_or(0.0);
-            let target = if let Some(end) = player.duration() {
-                (current + delta).clamp(0.0, end)
-            } else {
-                (current + delta).max(0.0)
+            // A key press can arrive while playbin is still discovering the file.
+            // The seek bar is unavailable then; keyboard seek should behave the same way.
+            let (Some(current), Some(end)) = (player.position(), player.duration()) else {
+                return;
             };
+            if end <= 0.0 {
+                return;
+            }
+            let target = (current + delta).clamp(0.0, end);
             if let Err(err) = player.seek(target) {
                 self.error = Some(err);
             }
@@ -329,35 +358,7 @@ impl eframe::App for MediaStrike {
             self.enqueue_media(dropped, true, ctx.clone());
         }
 
-        let open_shortcut =
-            ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::O));
-        let mut pick_files = open_shortcut.then_some(true);
-        if self.player.is_some() {
-            let (toggle, back, forward, previous, next) = ctx.input(|input| {
-                (
-                    input.key_pressed(egui::Key::Space),
-                    !input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
-                    !input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
-                    input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
-                    input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
-                )
-            });
-            if toggle {
-                self.toggle();
-            }
-            if back {
-                self.skip(-5.0);
-            }
-            if forward {
-                self.skip(5.0);
-            }
-            if previous {
-                self.previous_track(ctx.clone());
-            }
-            if next {
-                self.next_track(ctx.clone());
-            }
-        }
+        let mut pick_files = None;
 
         egui::TopBottomPanel::top("identity")
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
@@ -620,6 +621,36 @@ impl eframe::App for MediaStrike {
                 });
         }
 
+        let shortcuts = player_shortcuts(ctx);
+        if shortcuts.open_files && pick_files.is_none() {
+            pick_files = Some(true);
+        }
+        if self.player.is_some() {
+            if shortcuts.toggle {
+                self.toggle();
+            }
+            if shortcuts.back {
+                self.skip(-5.0);
+            }
+            if shortcuts.forward {
+                self.skip(5.0);
+            }
+            if shortcuts.previous {
+                self.previous_track(ctx.clone());
+            }
+            if shortcuts.next {
+                self.next_track(ctx.clone());
+            }
+            if shortcuts.toggle
+                || shortcuts.back
+                || shortcuts.forward
+                || shortcuts.previous
+                || shortcuts.next
+            {
+                ctx.request_repaint();
+            }
+        }
+
         if let Some(play_new) = pick_files {
             if let Some(paths) = rfd::FileDialog::new().pick_files() {
                 self.enqueue_media(paths, play_new, ctx.clone());
@@ -743,9 +774,254 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_time, parse_launch_args};
+    use super::{MediaStrike, PlayerShortcuts, format_time, parse_launch_args, player_shortcuts};
+    use eframe::egui;
     use std::ffi::OsString;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    fn shortcut_key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn filter_frame(
+        ctx: &egui::Context,
+        filter: &mut String,
+        events: Vec<egui::Event>,
+    ) -> (egui::Rect, bool, PlayerShortcuts) {
+        let modifiers = events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                egui::Event::Key { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 200.0),
+            )),
+            events,
+            focused: true,
+            modifiers,
+            ..Default::default()
+        };
+        let mut rect = egui::Rect::NOTHING;
+        let mut focused = false;
+        let mut shortcuts = PlayerShortcuts::default();
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let response = ui.add(egui::TextEdit::singleline(filter).hint_text("Filter queue"));
+                rect = response.rect;
+                focused = response.has_focus();
+            });
+            shortcuts = player_shortcuts(ctx);
+        });
+        (rect, focused, shortcuts)
+    }
+
+    #[test]
+    fn queue_filter_owns_shortcuts_on_first_click_and_while_typing() {
+        let ctx = egui::Context::default();
+        let mut filter = String::new();
+        let (rect, focused, _) = filter_frame(&ctx, &mut filter, vec![]);
+        assert!(!focused);
+
+        let position = rect.center();
+        let click = |pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let (_, focused, shortcuts) = filter_frame(
+            &ctx,
+            &mut filter,
+            vec![
+                egui::Event::PointerMoved(position),
+                click(true),
+                click(false),
+                shortcut_key(egui::Key::Space, egui::Modifiers::NONE),
+            ],
+        );
+        assert!(focused, "first click should focus the queue filter");
+        assert_eq!(shortcuts, PlayerShortcuts::default());
+
+        let (_, focused, shortcuts) = filter_frame(
+            &ctx,
+            &mut filter,
+            vec![
+                egui::Event::Text("sample".to_owned()),
+                shortcut_key(egui::Key::ArrowLeft, egui::Modifiers::NONE),
+                shortcut_key(
+                    egui::Key::ArrowRight,
+                    egui::Modifiers {
+                        alt: true,
+                        ..Default::default()
+                    },
+                ),
+            ],
+        );
+        assert!(focused, "typing should keep the queue filter focused");
+        assert!(filter.contains("sample"));
+        assert_eq!(shortcuts, PlayerShortcuts::default());
+
+        let alt = egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let command = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        for (key, modifiers, expected) in [
+            (
+                egui::Key::Space,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    toggle: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowLeft,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    back: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowRight,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    forward: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowLeft,
+                alt,
+                PlayerShortcuts {
+                    previous: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::ArrowRight,
+                alt,
+                PlayerShortcuts {
+                    next: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::O,
+                command,
+                PlayerShortcuts {
+                    open_files: true,
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let other = egui::Context::default();
+            let (_, focused, shortcuts) = filter_frame(
+                &other,
+                &mut String::new(),
+                vec![shortcut_key(key, modifiers)],
+            );
+            assert!(!focused, "no text field should own keyboard focus yet");
+            assert_eq!(
+                shortcuts, expected,
+                "shortcut {key:?} should work outside text"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires two generated local AVIs via PLAYSTRIKE_SAMPLE and PLAYSTRIKE_SAMPLE_SECOND"]
+    fn native_queue_controls_and_end_of_file_advance() {
+        gstreamer::init().expect("GStreamer runtime");
+        let first = PathBuf::from(std::env::var_os("PLAYSTRIKE_SAMPLE").expect("first AVI"));
+        let second =
+            PathBuf::from(std::env::var_os("PLAYSTRIKE_SAMPLE_SECOND").expect("second AVI"));
+        let ctx = egui::Context::default();
+        let mut app = MediaStrike {
+            player: None,
+            queue: Default::default(),
+            show_queue: true,
+            queue_search: String::new(),
+            texture: None,
+            brand_texture: None,
+            show_about: false,
+            seek_preview: None,
+            volume: 0.8,
+            status: String::new(),
+            error: None,
+            gst_ready: true,
+            capture: None,
+        };
+        app.enqueue_media(vec![first.clone(), second.clone()], true, ctx.clone());
+        assert_eq!(app.queue.current(), Some(0));
+        assert_eq!(app.player.as_ref().unwrap().path, first);
+        assert!(app.error.is_none());
+
+        app.next_track(ctx.clone());
+        assert_eq!(app.queue.current(), Some(1));
+        assert_eq!(app.player.as_ref().unwrap().path, second);
+        app.previous_track(ctx.clone());
+        assert_eq!(app.queue.current(), Some(0));
+        assert_eq!(app.player.as_ref().unwrap().path, first);
+
+        app.skip(0.5);
+        assert!(
+            app.error.is_none(),
+            "early seek should wait for file discovery"
+        );
+        let ready_deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < ready_deadline && app.player.as_ref().unwrap().duration().is_none() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.player.as_ref().unwrap().duration().is_some());
+        app.toggle();
+        assert!(!app.player.as_ref().unwrap().playing);
+        app.skip(0.5);
+        assert!(app.error.is_none(), "seek should succeed on the AVI");
+        app.volume = 0.4;
+        app.player.as_mut().unwrap().set_volume(app.volume);
+        assert_eq!(app.player.as_ref().unwrap().volume, 0.4);
+        app.toggle();
+        assert!(app.player.as_ref().unwrap().playing);
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < deadline && app.queue.current() != Some(1) {
+            app.refresh_player(&ctx);
+            assert!(app.error.is_none(), "first AVI should not fail");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(app.queue.current(), Some(1), "EOS should open second AVI");
+        assert_eq!(app.player.as_ref().unwrap().path, second);
+
+        while Instant::now() < deadline && app.status != "Finished" {
+            app.refresh_player(&ctx);
+            assert!(app.error.is_none(), "second AVI should not fail");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            app.status, "Finished",
+            "repeat-off should stop after second AVI"
+        );
+        assert_eq!(app.queue.current(), Some(1));
+        assert!(!app.player.as_ref().unwrap().playing);
+    }
 
     #[test]
     fn time_label_handles_long_media() {
