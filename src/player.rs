@@ -235,6 +235,15 @@ impl Player {
         self.pipeline.set_property("volume", self.volume);
     }
 
+    pub fn set_muted(&mut self, muted: bool) {
+        self.pipeline.set_property("mute", muted);
+    }
+
+    #[cfg(test)]
+    pub fn muted(&self) -> bool {
+        self.pipeline.property("mute")
+    }
+
     pub fn position(&self) -> Option<f64> {
         self.pipeline
             .query_position::<gst::ClockTime>()

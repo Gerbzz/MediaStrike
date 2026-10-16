@@ -2,7 +2,7 @@ name: MediaStrike native preview
 
 on:
   push:
-    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view]
+    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-mute-control]
 
 permissions:
   contents: read
@@ -76,6 +76,8 @@ jobs:
           $env:PLAYSTRIKE_SUBTITLE_SAMPLE = $subtitle
           cargo test --locked -j 2 focus_ -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Focus transition drag test failed' }
+          cargo test --locked -j 2 mute_survives_queue_and_subtitle_replacement -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'Mute continuity test failed' }
           cargo test --locked -j 2 discovers_and_switches_external_subtitle_track -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'External subtitle track test failed' }
           $vtt = Join-Path $env:RUNNER_TEMP 'mediastrike-synthetic.vtt'
