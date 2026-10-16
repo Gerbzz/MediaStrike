@@ -1452,7 +1452,25 @@ mod tests {
         );
         let ctx = egui::Context::default();
         let mut app = synthetic_app();
-        app.enqueue_media(vec![media], true, ctx.clone());
+        app.enqueue_media(vec![media.clone()], true, ctx.clone());
+        let caps = gstreamer::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("rate", 16000i32)
+            .field("channels", 1i32)
+            .build();
+        let audio_sink = gstreamer_app::AppSink::builder()
+            .caps(&caps)
+            .sync(true)
+            .max_buffers(2)
+            .drop(true)
+            .build();
+        app.player = Some(
+            super::Player::open_with_test_audio_sink(
+                &media, None, ctx.clone(), 0.8, false, 1.0, &audio_sink,
+            )
+            .expect("open synthetic A/V for UI pointer test"),
+        );
+        app.error = None;
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline
             && app.player.as_ref().is_none_or(|player| {
@@ -1480,6 +1498,12 @@ mod tests {
         }
 
         player_ui_frame(&mut app, &ctx, vec![]);
+        assert!(
+            app.player.is_some(),
+            "player lost before UI click: status={} error={:?}",
+            app.status,
+            app.error
+        );
         let mute = app.ui_mute_rect.expect("normal Mute button rendered");
         click(&mut app, &ctx, mute);
         assert!(app.muted && app.player.as_ref().unwrap().muted());
