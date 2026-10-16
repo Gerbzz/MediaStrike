@@ -17,6 +17,12 @@
 
 ## Player preview
 
+### Video-focused player view
+
+![MediaStrike focus view playing a synthetic captioned local video](assets/screenshots/mediastrike-focus-1517f4a.png)
+
+The [source-matched focus capture](docs/FOCUS_VIEW_FINAL_CAPTURE_PROVENANCE.md) shows the video using the window width with a full-width seek track in one transport row. The matching [normal-view capture](assets/screenshots/mediastrike-normal-1517f4a.png) shows the rails before focus mode. Both use synthetic local media and the same hosted Windows executable. Native F11 and button clicks still need hands-on review. The [first focus capture](docs/FOCUS_VIEW_CAPTURE_PROVENANCE.md) remains for comparison.
+
 ### MediaStrike subtitle preview
 
 ![MediaStrike source c48564e playing a synthetic local AVI with an external SRT caption](assets/screenshots/mediastrike-subtitles-srt-c48564e.png)
@@ -55,6 +61,8 @@ Add more local files without interrupting playback, select a queued file, filter
 
 Play and pause, seek with the bar or five-second steps, and adjust volume in the window. Keyboard shortcuts include **Space** for play/pause, **Left/Right** for seeking, **Alt+Left/Right** for previous/next file, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
 
+Use **F11** or **Focus view** to expand the video and keep a compact playback row. **Exit focus** or F11 restores the regular player and its queue visibility. Launch a video directly in that view with `--focus-view` after a media path.
+
 ### Choose local subtitles
 
 Open the **Subtitles** menu in the transport rail to turn captions off, choose a discovered text track, or load a local `.srt` or `.vtt` file for the current media. Loading a file prepares a replacement player while the current one continues, then restores its playback position and pause state before switching. An invalid file keeps the current player. Track availability depends on GStreamer plugins and the file; the menu reports unsupported extensions, missing files, and selection errors. For a launch-time subtitle, use `--subtitle path\to\captions.srt` after the media path. The file applies to the first opened item, not every item in the session queue. Subtitle styling, offset adjustment, and saved associations remain future work.
@@ -78,6 +86,8 @@ $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
 cargo run --locked -- path\to\first.mp4 path\to\second.mp4
 # To attach subtitles to the first item:
 cargo run --locked -- path\to\first.mp4 --subtitle path\to\captions.srt
+# To open directly in the video-focused view:
+cargo run --locked -- path\to\first.mp4 --focus-view
 ```
 
 Omit the media path to choose or drop a file in the window. Add `--offline` to Cargo after dependencies are cached. Check disk headroom before building and follow [VERIFY.md](VERIFY.md) for the remaining native review.

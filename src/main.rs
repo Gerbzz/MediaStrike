@@ -21,6 +21,7 @@ struct PlayerShortcuts {
     forward: bool,
     previous: bool,
     next: bool,
+    focus_view: bool,
 }
 
 fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
@@ -36,6 +37,7 @@ fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
         forward: !input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
         previous: input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
         next: input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
+        focus_view: input.key_pressed(egui::Key::F11),
     })
 }
 
@@ -76,6 +78,7 @@ struct MediaStrike {
     queue: MediaQueue,
     show_queue: bool,
     queue_search: String,
+    focus_view: bool,
     texture: Option<egui::TextureHandle>,
     brand_texture: Option<egui::TextureHandle>,
     show_about: bool,
@@ -93,6 +96,7 @@ impl MediaStrike {
         cc: &eframe::CreationContext<'_>,
         media_paths: Vec<PathBuf>,
         subtitle_path: Option<PathBuf>,
+        focus_view: bool,
         capture: Option<CaptureOnce>,
     ) -> Self {
         let (gst_ready, error) = match gstreamer::init() {
@@ -114,6 +118,7 @@ impl MediaStrike {
             queue: MediaQueue::default(),
             show_queue: true,
             queue_search: String::new(),
+            focus_view: false,
             texture: None,
             brand_texture: load_brand_texture(&cc.egui_ctx),
             show_about: false,
@@ -133,6 +138,7 @@ impl MediaStrike {
                 }
             }
         }
+        app.focus_view = focus_view && app.player.is_some();
         app
     }
 
@@ -504,9 +510,22 @@ impl MediaStrike {
     }
 }
 
-impl eframe::App for MediaStrike {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl MediaStrike {
+    fn set_focus_view(&mut self, focused: bool, ctx: &egui::Context) {
+        if self.focus_view != focused {
+            // The old view's slider will not receive drag_stopped after its
+            // panel disappears. Discard its uncommitted seek preview.
+            self.seek_preview = None;
+            self.focus_view = focused;
+            ctx.request_repaint();
+        }
+    }
+
+    fn update_ui(&mut self, ctx: &egui::Context) {
         self.refresh_player(ctx);
+        if self.player.is_none() {
+            self.set_focus_view(false, ctx);
+        }
         let dropped: Vec<_> = ctx.input(|input| {
             input
                 .raw
@@ -521,173 +540,267 @@ impl eframe::App for MediaStrike {
 
         let mut pick_files = None;
 
-        egui::TopBottomPanel::top("identity")
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
-            .show(ctx, |ui| {
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if let Some(texture) = &self.brand_texture {
-                        ui.image((texture.id(), egui::vec2(24.0, 24.0)));
-                    }
-                    ui.label(egui::RichText::new("MediaStrike").strong().size(17.0));
-                    ui.separator();
-                    if let Some(player) = &self.player {
-                        ui.label(egui::RichText::new(file_label(&player.path)).color(MUTED_TEXT));
-                    } else {
-                        ui.label(egui::RichText::new("Your media, in one place").color(MUTED_TEXT));
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("About").clicked() {
-                            self.show_about = true;
+        if !self.focus_view {
+            egui::TopBottomPanel::top("identity")
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
+                .show(ctx, |ui| {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if let Some(texture) = &self.brand_texture {
+                            ui.image((texture.id(), egui::vec2(24.0, 24.0)));
                         }
-                        if ui
-                            .button(if self.show_queue {
-                                "Hide queue"
-                            } else {
-                                "Show queue"
-                            })
-                            .clicked()
-                        {
-                            self.show_queue = !self.show_queue;
+                        ui.label(egui::RichText::new("MediaStrike").strong().size(17.0));
+                        ui.separator();
+                        if let Some(player) = &self.player {
+                            ui.label(
+                                egui::RichText::new(file_label(&player.path)).color(MUTED_TEXT),
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new("Your media, in one place").color(MUTED_TEXT),
+                            );
                         }
-                        if ui
-                            .add_enabled(self.gst_ready, egui::Button::new("Open files"))
-                            .clicked()
-                        {
-                            pick_files = Some(true);
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("About").clicked() {
+                                self.show_about = true;
+                            }
+                            if ui
+                                .add_enabled(self.player.is_some(), egui::Button::new("Focus view"))
+                                .clicked()
+                            {
+                                self.set_focus_view(true, ctx);
+                            }
+                            if ui
+                                .button(if self.show_queue {
+                                    "Hide queue"
+                                } else {
+                                    "Show queue"
+                                })
+                                .clicked()
+                            {
+                                self.show_queue = !self.show_queue;
+                            }
+                            if ui
+                                .add_enabled(self.gst_ready, egui::Button::new("Open files"))
+                                .clicked()
+                            {
+                                pick_files = Some(true);
+                            }
+                        });
                     });
+                    ui.add_space(6.0);
                 });
-                ui.add_space(6.0);
-            });
+        }
 
         let mut previous_clicked = false;
         let mut next_clicked = false;
         let mut subtitle_choice: Option<Option<String>> = None;
         let mut choose_external_subtitle = false;
-        egui::TopBottomPanel::bottom("transport")
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
-            .show(ctx, |ui| {
-                ui.add_space(6.0);
-                if let Some(player) = &mut self.player {
-                    let position = player.position().unwrap_or(0.0);
-                    let duration = player.duration().filter(|t| *t > 0.0);
-                    if let Some(duration) = duration {
-                        let mut value = self.seek_preview.unwrap_or(position).clamp(0.0, duration);
-                        let response = ui.add_sized(
-                            [ui.available_width(), 18.0],
-                            egui::Slider::new(&mut value, 0.0..=duration)
-                                .show_value(false)
-                                .text("Seek"),
-                        );
-                        if response.dragged() {
-                            self.seek_preview = Some(value);
-                        }
-                        if response.drag_stopped() || (response.changed() && !response.dragged()) {
-                            if let Err(err) = player.seek(value) {
-                                self.error = Some(err);
-                            }
-                            self.seek_preview = None;
-                        }
-                    } else {
-                        ui.label("Position unavailable for this media");
-                    }
+        if self.focus_view {
+            egui::TopBottomPanel::bottom("focus_transport")
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
+                .show(ctx, |ui| {
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        previous_clicked = ui.button("Prev").clicked();
-                        if ui
-                            .add(
-                                egui::Button::new(if player.playing { "Pause" } else { "Play" })
+                        if let Some(player) = &mut self.player {
+                            previous_clicked = ui.button("Prev").clicked();
+                            if ui
+                                .add(
+                                    egui::Button::new(if player.playing {
+                                        "Pause"
+                                    } else {
+                                        "Play"
+                                    })
                                     .fill(egui::Color32::from_rgb(176, 79, 8)),
-                            )
-                            .clicked()
-                        {
-                            if let Err(err) = player.toggle() {
-                                self.error = Some(err);
-                            } else {
-                                self.status =
-                                    if player.playing { "Playing" } else { "Paused" }.to_owned();
+                                )
+                                .clicked()
+                            {
+                                if let Err(error) = player.toggle() {
+                                    self.error = Some(error);
+                                } else {
+                                    self.status = if player.playing { "Playing" } else { "Paused" }
+                                        .to_owned();
+                                }
                             }
-                        }
-                        next_clicked = ui.button("Next").clicked();
-                        ui.label(format!(
-                            "{} / {}",
-                            format_time(position),
-                            duration
-                                .map(format_time)
-                                .unwrap_or_else(|| "--:--".to_owned())
-                        ));
-                        ui.separator();
-                        ui.label("Volume");
-                        let mut volume = self.volume;
-                        if ui
-                            .add(egui::Slider::new(&mut volume, 0.0..=1.0).show_value(false))
-                            .changed()
-                        {
-                            self.volume = volume;
-                            player.set_volume(volume);
-                        }
-                        ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
-                        ui.separator();
-                        let subtitle_tracks = player.subtitle_tracks().to_vec();
-                        let active_subtitle = player.selected_subtitle().map(str::to_owned);
-                        let selection_ready = player.subtitle_selection_ready();
-                        let external_file = player.external_subtitle().map(file_label);
-                        ui.menu_button(
-                            if external_file.is_some() {
-                                "Subtitles (file)"
+                            next_clicked = ui.button("Next").clicked();
+                            let position = player.position().unwrap_or(0.0);
+                            let duration = player.duration().filter(|time| *time > 0.0);
+                            if let Some(duration) = duration {
+                                let mut value =
+                                    self.seek_preview.unwrap_or(position).clamp(0.0, duration);
+                                let width = (ui.available_width() - 160.0).max(100.0);
+                                let response = ui
+                                    .scope(|ui| {
+                                        ui.spacing_mut().slider_width = width;
+                                        ui.add(
+                                            egui::Slider::new(&mut value, 0.0..=duration)
+                                                .show_value(false),
+                                        )
+                                    })
+                                    .inner;
+                                if response.dragged() {
+                                    self.seek_preview = Some(value);
+                                }
+                                if response.drag_stopped()
+                                    || (response.changed() && !response.dragged())
+                                {
+                                    if let Err(error) = player.seek(value) {
+                                        self.error = Some(error);
+                                    }
+                                    self.seek_preview = None;
+                                }
                             } else {
-                                "Subtitles"
-                            },
-                            |ui| {
-                                if subtitle_tracks.is_empty() {
-                                    ui.label("No subtitle tracks discovered");
-                                }
-                                ui.add_enabled_ui(selection_ready, |ui| {
-                                    if ui
-                                        .selectable_label(active_subtitle.is_none(), "Off")
-                                        .clicked()
-                                    {
-                                        subtitle_choice = Some(None);
-                                        ui.close_menu();
-                                    }
-                                    for track in &subtitle_tracks {
-                                        if ui
-                                            .selectable_label(
-                                                active_subtitle.as_deref()
-                                                    == Some(track.id.as_str()),
-                                                &track.label,
-                                            )
-                                            .clicked()
-                                        {
-                                            subtitle_choice = Some(Some(track.id.clone()));
-                                            ui.close_menu();
-                                        }
-                                    }
-                                });
-                                ui.separator();
-                                if let Some(file) = &external_file {
-                                    ui.label(format!("External: {file}"));
-                                }
-                                if ui.button("Load subtitle file...").clicked() {
-                                    choose_external_subtitle = true;
-                                    ui.close_menu();
-                                }
-                            },
-                        );
-                        ui.separator();
-                        if ui.button(self.queue.repeat().label()).clicked() {
-                            self.queue.cycle_repeat();
+                                ui.label("Seek unavailable");
+                            }
+                            ui.label(format!(
+                                "{} / {}",
+                                format_time(position),
+                                duration
+                                    .map(format_time)
+                                    .unwrap_or_else(|| "--:--".to_owned())
+                            ));
+                        }
+                        if ui.button("Exit focus").clicked() {
+                            self.set_focus_view(false, ctx);
                         }
                     });
-                } else {
-                    ui.label("Open or drop local media to start playback");
-                }
-                ui.label(egui::RichText::new(&self.status).color(MUTED_TEXT));
-                if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(255, 153, 127), error);
-                }
-                ui.add_space(6.0);
-            });
+                    if let Some(error) = &self.error {
+                        ui.colored_label(egui::Color32::from_rgb(255, 153, 127), error);
+                    }
+                    ui.add_space(4.0);
+                });
+        } else {
+            egui::TopBottomPanel::bottom("transport")
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 24)))
+                .show(ctx, |ui| {
+                    ui.add_space(6.0);
+                    if let Some(player) = &mut self.player {
+                        let position = player.position().unwrap_or(0.0);
+                        let duration = player.duration().filter(|t| *t > 0.0);
+                        if let Some(duration) = duration {
+                            let mut value =
+                                self.seek_preview.unwrap_or(position).clamp(0.0, duration);
+                            let response = ui.add_sized(
+                                [ui.available_width(), 18.0],
+                                egui::Slider::new(&mut value, 0.0..=duration)
+                                    .show_value(false)
+                                    .text("Seek"),
+                            );
+                            if response.dragged() {
+                                self.seek_preview = Some(value);
+                            }
+                            if response.drag_stopped()
+                                || (response.changed() && !response.dragged())
+                            {
+                                if let Err(err) = player.seek(value) {
+                                    self.error = Some(err);
+                                }
+                                self.seek_preview = None;
+                            }
+                        } else {
+                            ui.label("Position unavailable for this media");
+                        }
+                        ui.horizontal(|ui| {
+                            previous_clicked = ui.button("Prev").clicked();
+                            if ui
+                                .add(
+                                    egui::Button::new(if player.playing {
+                                        "Pause"
+                                    } else {
+                                        "Play"
+                                    })
+                                    .fill(egui::Color32::from_rgb(176, 79, 8)),
+                                )
+                                .clicked()
+                            {
+                                if let Err(err) = player.toggle() {
+                                    self.error = Some(err);
+                                } else {
+                                    self.status = if player.playing { "Playing" } else { "Paused" }
+                                        .to_owned();
+                                }
+                            }
+                            next_clicked = ui.button("Next").clicked();
+                            ui.label(format!(
+                                "{} / {}",
+                                format_time(position),
+                                duration
+                                    .map(format_time)
+                                    .unwrap_or_else(|| "--:--".to_owned())
+                            ));
+                            ui.separator();
+                            ui.label("Volume");
+                            let mut volume = self.volume;
+                            if ui
+                                .add(egui::Slider::new(&mut volume, 0.0..=1.0).show_value(false))
+                                .changed()
+                            {
+                                self.volume = volume;
+                                player.set_volume(volume);
+                            }
+                            ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
+                            ui.separator();
+                            let subtitle_tracks = player.subtitle_tracks().to_vec();
+                            let active_subtitle = player.selected_subtitle().map(str::to_owned);
+                            let selection_ready = player.subtitle_selection_ready();
+                            let external_file = player.external_subtitle().map(file_label);
+                            ui.menu_button(
+                                if external_file.is_some() {
+                                    "Subtitles (file)"
+                                } else {
+                                    "Subtitles"
+                                },
+                                |ui| {
+                                    if subtitle_tracks.is_empty() {
+                                        ui.label("No subtitle tracks discovered");
+                                    }
+                                    ui.add_enabled_ui(selection_ready, |ui| {
+                                        if ui
+                                            .selectable_label(active_subtitle.is_none(), "Off")
+                                            .clicked()
+                                        {
+                                            subtitle_choice = Some(None);
+                                            ui.close_menu();
+                                        }
+                                        for track in &subtitle_tracks {
+                                            if ui
+                                                .selectable_label(
+                                                    active_subtitle.as_deref()
+                                                        == Some(track.id.as_str()),
+                                                    &track.label,
+                                                )
+                                                .clicked()
+                                            {
+                                                subtitle_choice = Some(Some(track.id.clone()));
+                                                ui.close_menu();
+                                            }
+                                        }
+                                    });
+                                    ui.separator();
+                                    if let Some(file) = &external_file {
+                                        ui.label(format!("External: {file}"));
+                                    }
+                                    if ui.button("Load subtitle file...").clicked() {
+                                        choose_external_subtitle = true;
+                                        ui.close_menu();
+                                    }
+                                },
+                            );
+                            ui.separator();
+                            if ui.button(self.queue.repeat().label()).clicked() {
+                                self.queue.cycle_repeat();
+                            }
+                        });
+                    } else {
+                        ui.label("Open or drop local media to start playback");
+                    }
+                    ui.label(egui::RichText::new(&self.status).color(MUTED_TEXT));
+                    if let Some(error) = &self.error {
+                        ui.colored_label(egui::Color32::from_rgb(255, 153, 127), error);
+                    }
+                    ui.add_space(6.0);
+                });
+        }
 
         if previous_clicked {
             self.previous_track(ctx.clone());
@@ -699,35 +812,37 @@ impl eframe::App for MediaStrike {
             self.choose_subtitle(choice.as_deref());
         }
 
-        egui::SidePanel::left("navigation")
-            .resizable(false)
-            .default_width(158.0)
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(27, 27, 27)))
-            .show(ctx, |ui| {
-                ui.add_space(14.0);
-                ui.label(egui::RichText::new("YOUR MEDIA").color(MUTED_TEXT).small());
-                ui.add_space(12.0);
-                if ui
-                    .selectable_label(!self.show_queue, "Now playing")
-                    .clicked()
-                {
-                    self.show_queue = false;
-                }
-                if ui
-                    .selectable_label(self.show_queue, "Session queue")
-                    .clicked()
-                {
-                    self.show_queue = true;
-                }
-                ui.separator();
-                ui.label(
-                    egui::RichText::new(format!("{} local file(s)", self.queue.items().len()))
-                        .color(MUTED_TEXT),
-                );
-            });
+        if !self.focus_view {
+            egui::SidePanel::left("navigation")
+                .resizable(false)
+                .default_width(158.0)
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(27, 27, 27)))
+                .show(ctx, |ui| {
+                    ui.add_space(14.0);
+                    ui.label(egui::RichText::new("YOUR MEDIA").color(MUTED_TEXT).small());
+                    ui.add_space(12.0);
+                    if ui
+                        .selectable_label(!self.show_queue, "Now playing")
+                        .clicked()
+                    {
+                        self.show_queue = false;
+                    }
+                    if ui
+                        .selectable_label(self.show_queue, "Session queue")
+                        .clicked()
+                    {
+                        self.show_queue = true;
+                    }
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(format!("{} local file(s)", self.queue.items().len()))
+                            .color(MUTED_TEXT),
+                    );
+                });
+        }
 
         let mut select_index = None;
-        if self.show_queue {
+        if self.show_queue && !self.focus_view {
             egui::SidePanel::right("queue")
                 .resizable(true)
                 .default_width(265.0)
@@ -835,6 +950,9 @@ impl eframe::App for MediaStrike {
         }
 
         let shortcuts = player_shortcuts(ctx);
+        if shortcuts.focus_view && self.player.is_some() {
+            self.set_focus_view(!self.focus_view, ctx);
+        }
         if shortcuts.open_files && pick_files.is_none() {
             pick_files = Some(true);
         }
@@ -879,6 +997,12 @@ impl eframe::App for MediaStrike {
     }
 }
 
+impl eframe::App for MediaStrike {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_ui(ctx);
+    }
+}
+
 fn file_label(path: &std::path::Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -909,6 +1033,7 @@ fn format_time(seconds: f64) -> String {
 struct LaunchArgs {
     media_paths: Vec<PathBuf>,
     subtitle_path: Option<PathBuf>,
+    focus_view: bool,
     capture_path: Option<PathBuf>,
 }
 
@@ -916,16 +1041,26 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
     let mut args = args.into_iter().peekable();
     let mut media_paths = Vec::new();
     let mut subtitle_path = None;
+    let mut focus_view = false;
     let mut capture_path = None;
     while let Some(arg) = args.next() {
         if arg == "--subtitle" {
             let Some(path) = args.next() else {
                 return Err("--subtitle requires a local .srt or .vtt file".to_owned());
             };
-            if subtitle_path.is_some() || path == "--capture" || path == "--subtitle" {
+            if subtitle_path.is_some()
+                || path == "--capture"
+                || path == "--subtitle"
+                || path == "--focus-view"
+            {
                 return Err("Pass exactly one subtitle file to --subtitle".to_owned());
             }
             subtitle_path = Some(PathBuf::from(path));
+        } else if arg == "--focus-view" {
+            if focus_view {
+                return Err("Pass --focus-view only once".to_owned());
+            }
+            focus_view = true;
         } else if arg == "--capture" {
             let Some(output) = args.next() else {
                 return Err("--capture requires a new PNG path".to_owned());
@@ -948,9 +1083,13 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
     if subtitle_path.is_some() && media_paths.is_empty() {
         return Err("--subtitle requires at least one media file".to_owned());
     }
+    if focus_view && media_paths.is_empty() {
+        return Err("--focus-view requires at least one media file".to_owned());
+    }
     Ok(LaunchArgs {
         media_paths,
         subtitle_path,
+        focus_view,
         capture_path,
     })
 }
@@ -959,12 +1098,13 @@ fn main() -> ExitCode {
     let LaunchArgs {
         media_paths,
         subtitle_path,
+        focus_view,
         capture_path,
     } = match parse_launch_args(std::env::args_os().skip(1)) {
         Ok(args) => args,
         Err(error) => {
             eprintln!(
-                "{error}\nMediaStrike usage: playstrike [MEDIA_FILE ...] [--subtitle FILE.srt] [--capture FILE.png]"
+                "{error}\nMediaStrike usage: playstrike [MEDIA_FILE ...] [--subtitle FILE.srt] [--focus-view] [--capture FILE.png]"
             );
             return ExitCode::FAILURE;
         }
@@ -988,6 +1128,7 @@ fn main() -> ExitCode {
                 cc,
                 media_paths,
                 subtitle_path,
+                focus_view,
                 capture,
             )))
         }),
@@ -1027,6 +1168,7 @@ mod tests {
             queue: Default::default(),
             show_queue: true,
             queue_search: String::new(),
+            focus_view: false,
             texture: None,
             brand_texture: None,
             show_about: false,
@@ -1138,6 +1280,119 @@ mod tests {
         (rect, focused, shortcuts)
     }
 
+    fn player_ui_frame(app: &mut MediaStrike, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1120.0, 720.0),
+            )),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| app.update_ui(ctx));
+    }
+
+    fn paused_video_app(ctx: &egui::Context) -> MediaStrike {
+        gstreamer::init().expect("GStreamer runtime");
+        let video = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("AVI"));
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![video], true, ctx.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app
+                .player
+                .as_ref()
+                .and_then(|player| player.duration())
+                .is_none()
+        {
+            app.refresh_player(ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let player = app.player.as_mut().expect("opened synthetic media");
+        assert!(
+            player.duration().is_some(),
+            "synthetic media needs a seek range"
+        );
+        if player.playing {
+            player.toggle().expect("pause synthetic media");
+        }
+        app
+    }
+
+    fn pointer_button(position: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    #[ignore = "requires generated local video and GStreamer"]
+    fn focus_shortcut_cancels_seek_drag_in_both_directions() {
+        for focused in [false, true] {
+            let ctx = egui::Context::default();
+            let mut app = paused_video_app(&ctx);
+            app.focus_view = focused;
+            player_ui_frame(&mut app, &ctx, vec![]);
+            // The slider sets this preview while dragged. Seed that exact app
+            // state without depending on renderer-specific widget coordinates.
+            app.seek_preview = Some(2.0);
+            let position_before = app.player.as_ref().unwrap().position().unwrap_or(0.0);
+
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![shortcut_key(egui::Key::F11, egui::Modifiers::NONE)],
+            );
+            assert_eq!(app.focus_view, !focused, "F11 must change the view");
+            assert_eq!(app.seek_preview, None, "old seek drag must be canceled");
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![pointer_button(egui::pos2(80.0, 663.0), false)],
+            );
+            assert_eq!(app.seek_preview, None, "release must not revive old seek");
+            let position_after = app.player.as_ref().unwrap().position().unwrap_or(0.0);
+            assert!(
+                (position_after - position_before).abs() < 0.5,
+                "canceling a seek must not move playback"
+            );
+            assert!(app.show_queue, "focus change must retain queue visibility");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires generated local video and GStreamer"]
+    fn focus_buttons_cancel_pending_seek_in_both_directions() {
+        for focused in [false, true] {
+            let ctx = egui::Context::default();
+            let mut app = paused_video_app(&ctx);
+            app.focus_view = focused;
+            player_ui_frame(&mut app, &ctx, vec![]);
+            app.seek_preview = Some(2.0);
+            let button = if focused {
+                egui::pos2(1065.0, 704.0)
+            } else {
+                egui::pos2(1033.0, 18.0)
+            };
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(button),
+                    pointer_button(button, true),
+                    pointer_button(button, false),
+                ],
+            );
+            assert_eq!(app.focus_view, !focused, "button must change the view");
+            assert_eq!(app.seek_preview, None, "button must cancel old seek");
+            assert!(app.show_queue, "focus change must retain queue visibility");
+        }
+    }
+
     #[test]
     fn queue_filter_owns_shortcuts_on_first_click_and_while_typing() {
         let ctx = egui::Context::default();
@@ -1239,6 +1494,14 @@ mod tests {
                 command,
                 PlayerShortcuts {
                     open_files: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                egui::Key::F11,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    focus_view: true,
                     ..Default::default()
                 },
             ),
@@ -1632,6 +1895,26 @@ mod tests {
         assert!(
             parse_launch_args([OsString::from("--subtitle"), OsString::from("captions.srt")])
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn focus_view_launch_keeps_the_media_list_intact() {
+        let args = ["first.avi", "--focus-view", "--capture", "focus.png"]
+            .into_iter()
+            .map(OsString::from);
+        let parsed = parse_launch_args(args).expect("valid focus-view capture launch");
+        assert_eq!(parsed.media_paths, [PathBuf::from("first.avi")]);
+        assert_eq!(parsed.capture_path, Some(PathBuf::from("focus.png")));
+        assert!(parsed.focus_view);
+        assert!(parse_launch_args([OsString::from("--focus-view")]).is_err());
+        assert!(
+            parse_launch_args([
+                OsString::from("first.avi"),
+                OsString::from("--focus-view"),
+                OsString::from("--focus-view"),
+            ])
+            .is_err()
         );
     }
 }
