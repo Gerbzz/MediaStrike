@@ -23,10 +23,14 @@ pub struct Player {
     pipeline: gst::Element,
     bus: gst::Bus,
     frames: Arc<Mutex<Option<Frame>>>,
+    video_sink: gst_app::AppSink,
     frame_error: Arc<Mutex<Option<String>>>,
     pub path: PathBuf,
     pub playing: bool,
     pub volume: f64,
+    pub rate: f64,
+    pending_rate: Option<f64>,
+    rate_warning: Option<String>,
     subtitle_tracks: Vec<SubtitleTrack>,
     selected_non_text: Vec<String>,
     selected_subtitle: Option<String>,
@@ -66,6 +70,18 @@ impl Player {
         volume: f64,
         muted: bool,
     ) -> Result<Self, String> {
+        Self::open_with_settings(path, subtitle, ctx, volume, muted, 1.0)
+    }
+
+    pub fn open_with_settings(
+        path: &Path,
+        subtitle: Option<&Path>,
+        ctx: egui::Context,
+        volume: f64,
+        muted: bool,
+        rate: f64,
+    ) -> Result<Self, String> {
+        Self::validate_rate(rate)?;
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
         }
@@ -116,7 +132,12 @@ impl Player {
         pipeline.set_property("video-sink", &sink);
         pipeline.set_property("volume", volume.clamp(0.0, 1.0));
         pipeline.set_property("mute", muted);
-        if let Err(error) = pipeline.set_state(gst::State::Playing) {
+        let initial_state = if rate == 1.0 {
+            gst::State::Playing
+        } else {
+            gst::State::Paused
+        };
+        if let Err(error) = pipeline.set_state(initial_state) {
             let _ = pipeline.set_state(gst::State::Null);
             return Err(format!("Playback could not start: {error}"));
         }
@@ -124,10 +145,14 @@ impl Player {
             pipeline,
             bus,
             frames,
+            video_sink: sink,
             frame_error,
             path: path.to_path_buf(),
             playing: true,
             volume,
+            rate,
+            pending_rate: (rate != 1.0).then_some(rate),
+            rate_warning: None,
             subtitle_tracks: Vec::new(),
             selected_non_text: Vec::new(),
             selected_subtitle: None,
@@ -225,7 +250,81 @@ impl Player {
         }
     }
 
+    fn validate_rate(rate: f64) -> Result<(), String> {
+        if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
+            return Err("Playback speed must be between 0.5× and 2×".to_owned());
+        }
+        Ok(())
+    }
+
+    fn seek_with_rate(
+        &self,
+        seconds: f64,
+        rate: f64,
+        flags: gst::SeekFlags,
+    ) -> Result<(), String> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err("Seek position is invalid".to_owned());
+        }
+        let position = gst::ClockTime::from_nseconds((seconds * 1_000_000_000.0) as u64);
+        let event = gst::event::Seek::new(
+            rate,
+            flags,
+            gst::SeekType::Set,
+            position,
+            gst::SeekType::None,
+            gst::ClockTime::NONE,
+        );
+        if self.video_sink.send_event(event) {
+            return Ok(());
+        }
+        // Audio-only media have no active video sink. In that case the
+        // pipeline has only one playback sink to receive the rate seek.
+        self.pipeline
+            .seek(
+                rate,
+                flags,
+                gst::SeekType::Set,
+                position,
+                gst::SeekType::None,
+                gst::ClockTime::NONE,
+            )
+            .map_err(|error| format!("This media cannot change playback speed: {error}"))
+    }
+
+    pub fn set_rate(&mut self, rate: f64) -> Result<(), String> {
+        Self::validate_rate(rate)?;
+        if self.pending_rate.is_some() {
+            self.pending_rate = Some(rate);
+            self.rate = rate;
+            return Ok(());
+        }
+        if self.rate == rate {
+            return Ok(());
+        }
+        let position = self
+            .position()
+            .ok_or("Playback speed is unavailable until the media position is known")?;
+        self.seek_with_rate(position, rate, gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE)?;
+        self.rate = rate;
+        Ok(())
+    }
+
+    pub fn take_rate_warning(&mut self) -> Option<String> {
+        self.rate_warning.take()
+    }
+
+    #[cfg(test)]
+    pub fn effective_rate(&self) -> Option<f64> {
+        let mut query = gst::query::Segment::new(gst::Format::Time);
+        self.video_sink.query(&mut query).then(|| query.result().0)
+    }
+
     pub fn toggle(&mut self) -> Result<(), String> {
+        if self.pending_rate.is_some() {
+            self.playing = !self.playing;
+            return Ok(());
+        }
         let next = if self.playing {
             gst::State::Paused
         } else {
@@ -241,6 +340,13 @@ impl Player {
     pub fn seek(&self, seconds: f64) -> Result<(), String> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err("Seek position is invalid".to_owned());
+        }
+        if self.rate != 1.0 {
+            return self.seek_with_rate(
+                seconds,
+                self.rate,
+                gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+            );
         }
         self.pipeline
             .seek_simple(
@@ -312,7 +418,31 @@ impl Player {
                     }
                     self.streams_selected = true;
                 }
-                gst::MessageView::AsyncDone(..) => self.prerolled = true,
+                gst::MessageView::AsyncDone(..) => {
+                    self.prerolled = true;
+                    if let Some(rate) = self.pending_rate.take() {
+                        if rate != 1.0 {
+                            if let Err(error) = self.seek_with_rate(
+                                0.0,
+                                rate,
+                                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+                            ) {
+                                self.rate = 1.0;
+                                self.rate_warning = Some(format!(
+                                    "Playback continues at 1× because this file rejected {rate:.1}×: {error}"
+                                ));
+                            }
+                        }
+                        if self.playing {
+                            if let Err(error) = self.pipeline.set_state(gst::State::Playing) {
+                                self.playing = false;
+                                return Some(Err(format!(
+                                    "Playback could not resume after speed setup: {error}"
+                                )));
+                            }
+                        }
+                    }
+                },
                 gst::MessageView::Error(error) => {
                     self.playing = false;
                     return Some(Err(format!("Playback failed: {}", error.error())));
