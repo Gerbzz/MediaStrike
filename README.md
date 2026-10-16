@@ -19,9 +19,9 @@
 
 ### Video-focused player view
 
-![MediaStrike focus view playing a synthetic captioned local video](assets/screenshots/mediastrike-focus-6e414e7.png)
+![MediaStrike focus view playing a synthetic captioned local video](assets/screenshots/mediastrike-focus-1517f4a.png)
 
-The [source-matched focus capture](docs/FOCUS_VIEW_CAPTURE_PROVENANCE.md) shows the video using the window width with a single transport row. The matching [normal-view capture](assets/screenshots/mediastrike-normal-6e414e7.png) shows the rails before focus mode. Both use synthetic local media and the same hosted Windows executable. Native F11 and button clicks still need hands-on review.
+The [source-matched focus capture](docs/FOCUS_VIEW_FINAL_CAPTURE_PROVENANCE.md) shows the video using the window width with a full-width seek track in one transport row. The matching [normal-view capture](assets/screenshots/mediastrike-normal-1517f4a.png) shows the rails before focus mode. Both use synthetic local media and the same hosted Windows executable. Native F11 and button clicks still need hands-on review. The [first focus capture](docs/FOCUS_VIEW_CAPTURE_PROVENANCE.md) remains for comparison.
 
 ### MediaStrike subtitle preview
 
