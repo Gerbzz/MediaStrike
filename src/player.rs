@@ -66,6 +66,29 @@ impl Player {
         volume: f64,
         muted: bool,
     ) -> Result<Self, String> {
+        Self::open_with_audio_sink(path, subtitle, ctx, volume, muted, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_with_test_audio_sink(
+        path: &Path,
+        subtitle: Option<&Path>,
+        ctx: egui::Context,
+        volume: f64,
+        muted: bool,
+        audio_sink: &gst_app::AppSink,
+    ) -> Result<Self, String> {
+        Self::open_with_audio_sink(path, subtitle, ctx, volume, muted, Some(audio_sink))
+    }
+
+    fn open_with_audio_sink(
+        path: &Path,
+        subtitle: Option<&Path>,
+        ctx: egui::Context,
+        volume: f64,
+        muted: bool,
+        audio_sink: Option<&gst_app::AppSink>,
+    ) -> Result<Self, String> {
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
         }
@@ -114,6 +137,9 @@ impl Player {
             pipeline.set_property("suburi", subtitle_uri.as_str());
         }
         pipeline.set_property("video-sink", &sink);
+        if let Some(audio_sink) = audio_sink {
+            pipeline.set_property("audio-sink", audio_sink);
+        }
         pipeline.set_property("volume", volume.clamp(0.0, 1.0));
         pipeline.set_property("mute", muted);
         if let Err(error) = pipeline.set_state(gst::State::Playing) {
@@ -558,6 +584,138 @@ mod tests {
             .expect("restore first track");
         wait_for_selected_track(&mut player, &first);
         assert!(text_output_enabled(&player));
+    }
+
+    #[test]
+    #[ignore = "requires generated local PCM Matroska via PLAYSTRIKE_MUTE_AUDIO_VIDEO"]
+    fn muted_pcm_output_survives_start_pause_and_replay() {
+        use gstreamer_app as gst_app;
+
+        fn probe() -> gst_app::AppSink {
+            let caps = gst::Caps::builder("audio/x-raw")
+                .field("format", "S16LE")
+                .field("rate", 16000i32)
+                .field("channels", 1i32)
+                .build();
+            gst_app::AppSink::builder()
+                .caps(&caps)
+                .sync(true)
+                .max_buffers(2)
+                .drop(true)
+                .build()
+        }
+
+        fn sample_bytes(sample: &gst::Sample) -> Vec<u8> {
+            sample
+                .buffer()
+                .expect("audio sample buffer")
+                .map_readable()
+                .expect("readable PCM")
+                .as_slice()
+                .to_vec()
+        }
+
+        fn assert_silent_samples(sink: &gst_app::AppSink, player: &mut Player, phase: &str) {
+            let deadline = Instant::now() + Duration::from_secs(4);
+            let mut checked = 0;
+            while Instant::now() < deadline && checked < 3 {
+                if let Some(event) = player.poll_event() {
+                    event.unwrap_or_else(|error| panic!("{phase}: {error}"));
+                }
+                if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(200)) {
+                    let bytes = sample_bytes(&sample);
+                    assert!(!bytes.is_empty(), "{phase}: empty PCM sample");
+                    assert!(
+                        bytes.iter().all(|byte| *byte == 0),
+                        "{phase}: nonzero PCM reached audio sink while muted"
+                    );
+                    checked += 1;
+                }
+            }
+            assert_eq!(checked, 3, "{phase}: no bounded PCM output to inspect");
+        }
+
+        fn assert_audible_samples(sink: &gst_app::AppSink, player: &mut Player) {
+            let deadline = Instant::now() + Duration::from_secs(4);
+            let mut checked = 0;
+            while Instant::now() < deadline {
+                if let Some(event) = player.poll_event() {
+                    event.expect("baseline playback");
+                }
+                if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(200)) {
+                    let bytes = sample_bytes(&sample);
+                    checked += 1;
+                    if bytes.iter().any(|byte| *byte != 0) {
+                        return;
+                    }
+                }
+            }
+            panic!("unmuted synthetic tone produced no nonzero PCM in {checked} samples");
+        }
+
+        fn drain(sink: &gst_app::AppSink) {
+            while sink.try_pull_sample(gst::ClockTime::ZERO).is_some() {}
+        }
+
+        gst::init().expect("GStreamer runtime");
+        let media = std::env::var_os("PLAYSTRIKE_MUTE_AUDIO_VIDEO").expect("PCM fixture");
+        let media = Path::new(&media);
+        let ctx = eframe::egui::Context::default();
+        let sink = probe();
+        let mut player =
+            Player::open_with_test_audio_sink(media, None, ctx.clone(), 0.8, true, &sink)
+                .expect("start muted with real audio stream");
+        assert!(player.muted());
+        assert_silent_samples(&sink, &mut player, "startup");
+
+        player.toggle().expect("pause");
+        let (result, state, _) = player.pipeline.state(Some(gst::ClockTime::from_seconds(3)));
+        assert!(result.is_ok(), "pause must settle");
+        assert_eq!(state, gst::State::Paused);
+        player.seek(0.0).expect("seek while paused");
+        drain(&sink);
+        player.toggle().expect("resume");
+        assert_silent_samples(&sink, &mut player, "resume");
+
+        player.set_muted(false);
+        player.seek(0.0).expect("restart unmuted tone");
+        drain(&sink);
+        assert_audible_samples(&sink, &mut player);
+        player.set_muted(true);
+        player.seek(0.0).expect("restart muted tone");
+        drain(&sink);
+        assert_silent_samples(&sink, &mut player, "remute");
+
+        // The same item's EOS path pauses and seeks back to zero.
+        player.seek(7.5).expect("seek near end for same-item replay");
+        let deadline = Instant::now() + Duration::from_secs(12);
+        let mut reached_eos = false;
+        while Instant::now() < deadline {
+            if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
+                let bytes = sample_bytes(&sample);
+                assert!(
+                    bytes.iter().all(|byte| *byte == 0),
+                    "nonzero PCM reached sink before same-item replay"
+                );
+            }
+            if let Some(event) = player.poll_event() {
+                event.expect("same-item playback");
+                if !player.playing {
+                    reached_eos = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            reached_eos,
+            "synthetic item did not reach EOS: position={:?}, duration={:?}, playing={}",
+            player.position(),
+            player.duration(),
+            player.playing
+        );
+        drain(&sink);
+        player.toggle().expect("replay same item");
+        assert_silent_samples(&sink, &mut player, "same-item replay");
     }
 
     #[test]
