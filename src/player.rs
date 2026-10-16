@@ -70,7 +70,7 @@ impl Player {
     }
 
     #[cfg(test)]
-    fn open_with_test_audio_sink(
+    pub(crate) fn open_with_test_audio_sink(
         path: &Path,
         subtitle: Option<&Path>,
         ctx: egui::Context,
@@ -587,8 +587,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires generated local PCM Matroska and malformed SRT via PLAYSTRIKE_MUTE_AUDIO_VIDEO and PLAYSTRIKE_SUBTITLE_MALFORMED"]
-    fn muted_pcm_output_survives_start_pause_failure_and_replay() {
+    #[ignore = "requires generated local PCM Matroska via PLAYSTRIKE_MUTE_AUDIO_VIDEO"]
+    fn muted_pcm_output_survives_start_pause_and_replay() {
         use gstreamer_app as gst_app;
 
         fn probe() -> gst_app::AppSink {
@@ -659,10 +659,7 @@ mod tests {
 
         gst::init().expect("GStreamer runtime");
         let media = std::env::var_os("PLAYSTRIKE_MUTE_AUDIO_VIDEO").expect("PCM fixture");
-        let malformed =
-            std::env::var_os("PLAYSTRIKE_SUBTITLE_MALFORMED").expect("malformed SRT");
         let media = Path::new(&media);
-        let malformed = Path::new(&malformed);
         let ctx = eframe::egui::Context::default();
         let sink = probe();
         let mut player =
@@ -688,45 +685,6 @@ mod tests {
         player.seek(0.0).expect("restart muted tone");
         drain(&sink);
         assert_silent_samples(&sink, &mut player, "remute");
-
-        // The malformed candidate may fail before it delivers PCM. In either case
-        // the original pipeline must remain muted and capable of silent output.
-        player.toggle().expect("pause original during candidate load");
-        let candidate_sink = probe();
-        let candidate = Player::open_with_test_audio_sink(
-            media,
-            Some(malformed),
-            ctx,
-            0.0,
-            true,
-            &candidate_sink,
-        );
-        if let Ok(mut candidate) = candidate {
-            let deadline = Instant::now() + Duration::from_secs(6);
-            let mut failed = false;
-            while Instant::now() < deadline {
-                if let Some(sample) =
-                    candidate_sink.try_pull_sample(gst::ClockTime::from_mseconds(100))
-                {
-                    let bytes = sample_bytes(&sample);
-                    assert!(
-                        bytes.iter().all(|byte| *byte == 0),
-                        "candidate emitted nonzero PCM while muted"
-                    );
-                }
-                if let Some(event) = candidate.poll_event() {
-                    if event.is_err() {
-                        failed = true;
-                        break;
-                    }
-                }
-            }
-            assert!(failed, "malformed subtitle candidate did not fail");
-        }
-        player.seek(0.0).expect("restart original after candidate failure");
-        drain(&sink);
-        player.toggle().expect("resume original after candidate failure");
-        assert_silent_samples(&sink, &mut player, "candidate failure");
 
         // The same item's EOS path pauses and seeks back to zero.
         player.seek(7.5).expect("seek near end for same-item replay");
