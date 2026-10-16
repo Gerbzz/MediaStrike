@@ -38,7 +38,16 @@ pub struct Player {
 
 impl Player {
     pub fn open(path: &Path, ctx: egui::Context, volume: f64) -> Result<Self, String> {
-        Self::open_with_subtitle(path, None, ctx, volume)
+        Self::open_muted(path, ctx, volume, false)
+    }
+
+    pub fn open_muted(
+        path: &Path,
+        ctx: egui::Context,
+        volume: f64,
+        muted: bool,
+    ) -> Result<Self, String> {
+        Self::open_with_subtitle_muted(path, None, ctx, volume, muted)
     }
 
     pub fn open_with_subtitle(
@@ -46,6 +55,16 @@ impl Player {
         subtitle: Option<&Path>,
         ctx: egui::Context,
         volume: f64,
+    ) -> Result<Self, String> {
+        Self::open_with_subtitle_muted(path, subtitle, ctx, volume, false)
+    }
+
+    pub fn open_with_subtitle_muted(
+        path: &Path,
+        subtitle: Option<&Path>,
+        ctx: egui::Context,
+        volume: f64,
+        muted: bool,
     ) -> Result<Self, String> {
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
@@ -96,6 +115,7 @@ impl Player {
         }
         pipeline.set_property("video-sink", &sink);
         pipeline.set_property("volume", volume.clamp(0.0, 1.0));
+        pipeline.set_property("mute", muted);
         if let Err(error) = pipeline.set_state(gst::State::Playing) {
             let _ = pipeline.set_state(gst::State::Null);
             return Err(format!("Playback could not start: {error}"));
@@ -233,6 +253,15 @@ impl Player {
     pub fn set_volume(&mut self, volume: f64) {
         self.volume = volume.clamp(0.0, 1.0);
         self.pipeline.set_property("volume", self.volume);
+    }
+
+    pub fn set_muted(&mut self, muted: bool) {
+        self.pipeline.set_property("mute", muted);
+    }
+
+    #[cfg(test)]
+    pub fn muted(&self) -> bool {
+        self.pipeline.property("mute")
     }
 
     pub fn position(&self) -> Option<f64> {

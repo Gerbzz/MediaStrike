@@ -59,7 +59,7 @@ Add more local files without interrupting playback, select a queued file, filter
 
 ### Stay in control of playback
 
-Play and pause, seek with the bar or five-second steps, and adjust volume in the window. Keyboard shortcuts include **Space** for play/pause, **Left/Right** for seeking, **Alt+Left/Right** for previous/next file, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
+Play and pause, seek with the bar or five-second steps, adjust volume, and use **Mute** in either player view. Muting keeps the selected volume and continues across queued files and subtitle changes; moving the volume slider unmutes. Keyboard shortcuts include **Space** for play/pause, **M** for mute, **Left/Right** for seeking, **Alt+Left/Right** for previous/next file, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
 
 Use **F11** or **Focus view** to expand the video and keep a compact playback row. **Exit focus** or F11 restores the regular player and its queue visibility. Launch a video directly in that view with `--focus-view` after a media path.
 

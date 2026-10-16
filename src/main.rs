@@ -22,6 +22,7 @@ struct PlayerShortcuts {
     previous: bool,
     next: bool,
     focus_view: bool,
+    mute: bool,
 }
 
 fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
@@ -38,6 +39,7 @@ fn player_shortcuts(ctx: &egui::Context) -> PlayerShortcuts {
         previous: input.modifiers.alt && input.key_pressed(egui::Key::ArrowLeft),
         next: input.modifiers.alt && input.key_pressed(egui::Key::ArrowRight),
         focus_view: input.key_pressed(egui::Key::F11),
+        mute: input.key_pressed(egui::Key::M),
     })
 }
 
@@ -84,6 +86,7 @@ struct MediaStrike {
     show_about: bool,
     seek_preview: Option<f64>,
     volume: f64,
+    muted: bool,
     status: String,
     error: Option<String>,
     gst_ready: bool,
@@ -124,6 +127,7 @@ impl MediaStrike {
             show_about: false,
             seek_preview: None,
             volume: 0.8,
+            muted: false,
             status: "Open or drop a local media file".to_owned(),
             error,
             gst_ready,
@@ -171,7 +175,7 @@ impl MediaStrike {
         let Some(path) = self.queue.path(index).map(PathBuf::from) else {
             return;
         };
-        match Player::open(&path, ctx, self.volume) {
+        match Player::open_muted(&path, ctx, self.volume, self.muted) {
             Ok(player) => {
                 self.queue.select(index);
                 self.player = Some(player);
@@ -198,7 +202,13 @@ impl MediaStrike {
         // A successful set_state only requests an asynchronous GStreamer load.
         // Keep the playable pipeline alive until its replacement has a text stream.
         self.pending_subtitle_load = None;
-        let candidate = Player::open_with_subtitle(&media_path, Some(&subtitle_path), ctx, 0.0)?;
+        let candidate = Player::open_with_subtitle_muted(
+            &media_path,
+            Some(&subtitle_path),
+            ctx,
+            0.0,
+            self.muted,
+        )?;
         self.pending_subtitle_load = Some(PendingSubtitleLoad {
             player: candidate,
             path: subtitle_path.clone(),
@@ -285,6 +295,7 @@ impl MediaStrike {
                 return;
             }
         }
+        pending.player.set_muted(self.muted);
         pending.player.set_volume(self.volume);
         self.player = Some(pending.player);
         self.texture = None;
@@ -317,6 +328,16 @@ impl MediaStrike {
         } else if let Some(player) = &self.player {
             if let Err(err) = player.seek(0.0) {
                 self.error = Some(err);
+            }
+        }
+    }
+
+    fn toggle_mute(&mut self) {
+        if let Some(player) = &mut self.player {
+            self.muted = !self.muted;
+            player.set_muted(self.muted);
+            if let Some(pending) = &mut self.pending_subtitle_load {
+                pending.player.set_muted(self.muted);
             }
         }
     }
@@ -594,6 +615,7 @@ impl MediaStrike {
 
         let mut previous_clicked = false;
         let mut next_clicked = false;
+        let mut mute_clicked = false;
         let mut subtitle_choice: Option<Option<String>> = None;
         let mut choose_external_subtitle = false;
         if self.focus_view {
@@ -623,6 +645,9 @@ impl MediaStrike {
                                 }
                             }
                             next_clicked = ui.button("Next").clicked();
+                            mute_clicked = ui
+                                .button(if self.muted { "Unmute" } else { "Mute" })
+                                .clicked();
                             let position = player.position().unwrap_or(0.0);
                             let duration = player.duration().filter(|time| *time > 0.0);
                             if let Some(duration) = duration {
@@ -737,8 +762,16 @@ impl MediaStrike {
                             {
                                 self.volume = volume;
                                 player.set_volume(volume);
+                                self.muted = false;
+                                player.set_muted(false);
+                                if let Some(pending) = &mut self.pending_subtitle_load {
+                                    pending.player.set_muted(false);
+                                }
                             }
                             ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
+                            mute_clicked = ui
+                                .button(if self.muted { "Unmute" } else { "Mute" })
+                                .clicked();
                             ui.separator();
                             let subtitle_tracks = player.subtitle_tracks().to_vec();
                             let active_subtitle = player.selected_subtitle().map(str::to_owned);
@@ -802,6 +835,9 @@ impl MediaStrike {
                 });
         }
 
+        if mute_clicked {
+            self.toggle_mute();
+        }
         if previous_clicked {
             self.previous_track(ctx.clone());
         }
@@ -960,6 +996,9 @@ impl MediaStrike {
             if shortcuts.toggle {
                 self.toggle();
             }
+            if shortcuts.mute {
+                self.toggle_mute();
+            }
             if shortcuts.back {
                 self.skip(-5.0);
             }
@@ -973,6 +1012,7 @@ impl MediaStrike {
                 self.next_track(ctx.clone());
             }
             if shortcuts.toggle
+                || shortcuts.mute
                 || shortcuts.back
                 || shortcuts.forward
                 || shortcuts.previous
@@ -1174,6 +1214,7 @@ mod tests {
             show_about: false,
             seek_preview: None,
             volume: 0.8,
+            muted: false,
             status: String::new(),
             error: None,
             gst_ready: true,
@@ -1505,6 +1546,14 @@ mod tests {
                     ..Default::default()
                 },
             ),
+            (
+                egui::Key::M,
+                egui::Modifiers::NONE,
+                PlayerShortcuts {
+                    mute: true,
+                    ..Default::default()
+                },
+            ),
         ] {
             let other = egui::Context::default();
             let (_, focused, shortcuts) = filter_frame(
@@ -1518,6 +1567,38 @@ mod tests {
                 "shortcut {key:?} should work outside text"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires generated local videos and SRT via PLAYSTRIKE_SUBTITLE_VIDEO, PLAYSTRIKE_SAMPLE, and PLAYSTRIKE_SUBTITLE_SAMPLE"]
+    fn mute_survives_queue_and_subtitle_replacement() {
+        gstreamer::init().expect("GStreamer runtime");
+        let video = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("video"));
+        let next = PathBuf::from(std::env::var_os("PLAYSTRIKE_SAMPLE").expect("next video"));
+        let subtitle = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_SAMPLE").expect("SRT"));
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![video.clone(), next], true, ctx.clone());
+        app.toggle_mute();
+        assert!(app.muted);
+        assert!(app.player.as_ref().unwrap().muted());
+        assert_eq!(app.player.as_ref().unwrap().volume, 0.8);
+        app.next_track(ctx.clone());
+        assert!(app.player.as_ref().unwrap().muted());
+        app.previous_track(ctx.clone());
+        assert_eq!(app.player.as_ref().unwrap().path, video);
+        assert!(app.player.as_ref().unwrap().muted());
+        app.load_external_subtitle(subtitle, ctx.clone()).expect("load SRT");
+        assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
+        app.toggle_mute();
+        assert!(!app.pending_subtitle_load.as_ref().unwrap().player.muted());
+        app.toggle_mute();
+        assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
+        wait_for_pending_subtitle(&mut app, &ctx);
+        assert!(app.player.as_ref().unwrap().muted());
+        app.toggle_mute();
+        assert!(!app.player.as_ref().unwrap().muted());
+        assert_eq!(app.player.as_ref().unwrap().volume, 0.8);
     }
 
     #[test]
