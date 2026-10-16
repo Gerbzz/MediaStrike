@@ -175,9 +175,8 @@ impl MediaStrike {
         let Some(path) = self.queue.path(index).map(PathBuf::from) else {
             return;
         };
-        match Player::open(&path, ctx, self.volume) {
-            Ok(mut player) => {
-                player.set_muted(self.muted);
+        match Player::open_muted(&path, ctx, self.volume, self.muted) {
+            Ok(player) => {
                 self.queue.select(index);
                 self.player = Some(player);
                 self.texture = None;
@@ -203,7 +202,13 @@ impl MediaStrike {
         // A successful set_state only requests an asynchronous GStreamer load.
         // Keep the playable pipeline alive until its replacement has a text stream.
         self.pending_subtitle_load = None;
-        let candidate = Player::open_with_subtitle(&media_path, Some(&subtitle_path), ctx, 0.0)?;
+        let candidate = Player::open_with_subtitle_muted(
+            &media_path,
+            Some(&subtitle_path),
+            ctx,
+            0.0,
+            self.muted,
+        )?;
         self.pending_subtitle_load = Some(PendingSubtitleLoad {
             player: candidate,
             path: subtitle_path.clone(),
@@ -290,8 +295,8 @@ impl MediaStrike {
                 return;
             }
         }
-        pending.player.set_volume(self.volume);
         pending.player.set_muted(self.muted);
+        pending.player.set_volume(self.volume);
         self.player = Some(pending.player);
         self.texture = None;
         self.seek_preview = None;
@@ -1584,6 +1589,7 @@ mod tests {
         assert_eq!(app.player.as_ref().unwrap().path, video);
         assert!(app.player.as_ref().unwrap().muted());
         app.load_external_subtitle(subtitle, ctx.clone()).expect("load SRT");
+        assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
         app.toggle_mute();
         assert!(!app.pending_subtitle_load.as_ref().unwrap().player.muted());
         app.toggle_mute();
