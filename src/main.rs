@@ -620,10 +620,15 @@ impl eframe::App for MediaStrike {
                                 let mut value =
                                     self.seek_preview.unwrap_or(position).clamp(0.0, duration);
                                 let width = (ui.available_width() - 160.0).max(100.0);
-                                let response = ui.add_sized(
-                                    [width, 18.0],
-                                    egui::Slider::new(&mut value, 0.0..=duration).show_value(false),
-                                );
+                                let response = ui
+                                    .scope(|ui| {
+                                        ui.spacing_mut().slider_width = width;
+                                        ui.add(
+                                            egui::Slider::new(&mut value, 0.0..=duration)
+                                                .show_value(false),
+                                        )
+                                    })
+                                    .inner;
                                 if response.dragged() {
                                     self.seek_preview = Some(value);
                                 }
