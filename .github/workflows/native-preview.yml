@@ -2,7 +2,7 @@ name: MediaStrike native preview
 
 on:
   push:
-    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-mute-control, codex/mediastrike-speed-control]
+    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-mute-control, codex/mediastrike-speed-control, codex/mediastrike-ui-av-integration]
 
 permissions:
   contents: read
@@ -88,6 +88,18 @@ jobs:
           'not a subtitle file' | Set-Content -LiteralPath $malformed -Encoding ascii
           $env:PLAYSTRIKE_SUBTITLE_VTT = $vtt
           $env:PLAYSTRIKE_SUBTITLE_MALFORMED = $malformed
+          $audioVideo = Join-Path $env:RUNNER_TEMP 'mediastrike-mute-audio.mkv'
+          $audioVideoGst = $audioVideo.Replace('\', '/')
+          & gst-launch-1.0.exe -q -e matroskamux name=mux ! filesink "location=$audioVideoGst" `
+            videotestsrc pattern=black num-buffers=8 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.video_0 `
+            audiotestsrc wave=sine num-buffers=80 samplesperbuffer=1600 ! 'audio/x-raw,format=S16LE,channels=1,rate=16000' ! queue ! mux.audio_0
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $audioVideo)) { throw 'Mute PCM fixture generation failed' }
+          if ((Get-Item $audioVideo).Length -gt 3MB) { throw 'Mute PCM fixture exceeds 3 MiB cap' }
+          $env:PLAYSTRIKE_MUTE_AUDIO_VIDEO = $audioVideo
+          cargo test --locked -j 2 muted_pcm_output_survives_start_pause_and_replay -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Mute startup, pause, and replay output-sample test failed' }
+          cargo test --locked -j 2 muted_pcm_survives_app_subtitle_failure -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'App subtitle failure mute output-sample test failed' }
           cargo test --locked -j 2 subtitle_file_choice_keeps_playback_on_cancel_and_async_failure -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Subtitle file state and async failure test failed' }
           $embeddedA = Join-Path $env:RUNNER_TEMP 'mediastrike-embedded-a.srt'
