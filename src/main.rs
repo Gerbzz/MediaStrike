@@ -511,10 +511,20 @@ impl MediaStrike {
 }
 
 impl MediaStrike {
+    fn set_focus_view(&mut self, focused: bool, ctx: &egui::Context) {
+        if self.focus_view != focused {
+            // The old view's slider will not receive drag_stopped after its
+            // panel disappears. Discard its uncommitted seek preview.
+            self.seek_preview = None;
+            self.focus_view = focused;
+            ctx.request_repaint();
+        }
+    }
+
     fn update_ui(&mut self, ctx: &egui::Context) {
         self.refresh_player(ctx);
         if self.player.is_none() {
-            self.focus_view = false;
+            self.set_focus_view(false, ctx);
         }
         let dropped: Vec<_> = ctx.input(|input| {
             input
@@ -558,8 +568,7 @@ impl MediaStrike {
                                 .add_enabled(self.player.is_some(), egui::Button::new("Focus view"))
                                 .clicked()
                             {
-                                self.focus_view = true;
-                                ctx.request_repaint();
+                                self.set_focus_view(true, ctx);
                             }
                             if ui
                                 .button(if self.show_queue {
@@ -652,8 +661,7 @@ impl MediaStrike {
                             ));
                         }
                         if ui.button("Exit focus").clicked() {
-                            self.focus_view = false;
-                            ctx.request_repaint();
+                            self.set_focus_view(false, ctx);
                         }
                     });
                     if let Some(error) = &self.error {
@@ -943,8 +951,7 @@ impl MediaStrike {
 
         let shortcuts = player_shortcuts(ctx);
         if shortcuts.focus_view && self.player.is_some() {
-            self.focus_view = !self.focus_view;
-            ctx.request_repaint();
+            self.set_focus_view(!self.focus_view, ctx);
         }
         if shortcuts.open_files && pick_files.is_none() {
             pick_files = Some(true);
