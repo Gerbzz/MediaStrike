@@ -131,8 +131,9 @@ jobs:
             $capture = Join-Path $env:RUNNER_TEMP "mediastrike-$view-control-preview.png"
             $arguments = @($avTiming, '--capture', $capture)
             if ($view -eq 'focus') { $arguments = @($avTiming, '--focus-view', '--capture', $capture) }
+            $stderr = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-stderr.txt"
             try {
-              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden
+              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardError $stderr
               if (-not $app.WaitForExit(20000)) {
                 $app.Kill()
                 $app.WaitForExit()
@@ -146,6 +147,10 @@ jobs:
               }
             } catch {
               "$view=unavailable error=$($_.Exception.GetType().Name)" | Add-Content artifact/capture-probe.txt -Encoding ascii
+            } finally {
+              if (Test-Path -LiteralPath $stderr) {
+                Get-Content -LiteralPath $stderr -TotalCount 8 | ForEach-Object { Write-Host "capture $view stderr: $_" }
+              }
             }
           }
           Get-Content artifact/capture-probe.txt
