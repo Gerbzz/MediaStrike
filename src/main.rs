@@ -1706,7 +1706,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(app.status.starts_with("Replaying "), "repeat one did not replay");
-        assert_eq!(app.player.as_ref().unwrap().rate, 1.5);
+        wait_for_speed(&mut app, &ctx, 1.5);
         assert!(app.player.as_ref().unwrap().muted());
         assert!(app.focus_view && app.show_queue);
     }
