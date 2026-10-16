@@ -2,7 +2,7 @@ name: MediaStrike native preview
 
 on:
   push:
-    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-mute-control, codex/mediastrike-speed-control]
+    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-mute-control, codex/mediastrike-speed-control, codex/mediastrike-ui-av-integration]
 
 permissions:
   contents: read
@@ -88,6 +88,67 @@ jobs:
           'not a subtitle file' | Set-Content -LiteralPath $malformed -Encoding ascii
           $env:PLAYSTRIKE_SUBTITLE_VTT = $vtt
           $env:PLAYSTRIKE_SUBTITLE_MALFORMED = $malformed
+          $audioVideo = Join-Path $env:RUNNER_TEMP 'mediastrike-mute-audio.mkv'
+          $audioVideoGst = $audioVideo.Replace('\', '/')
+          & gst-launch-1.0.exe -q -e matroskamux name=mux ! filesink "location=$audioVideoGst" `
+            videotestsrc pattern=black num-buffers=8 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.video_0 `
+            audiotestsrc wave=sine num-buffers=80 samplesperbuffer=1600 ! 'audio/x-raw,format=S16LE,channels=1,rate=16000' ! queue ! mux.audio_0
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $audioVideo)) { throw 'Mute PCM fixture generation failed' }
+          if ((Get-Item $audioVideo).Length -gt 3MB) { throw 'Mute PCM fixture exceeds 3 MiB cap' }
+          $env:PLAYSTRIKE_MUTE_AUDIO_VIDEO = $audioVideo
+          cargo test --locked -j 2 muted_pcm_output_survives_start_pause_and_replay -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Mute startup, pause, and replay output-sample test failed' }
+          cargo test --locked -j 2 muted_pcm_survives_app_subtitle_failure -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'App subtitle failure mute output-sample test failed' }
+          cargo test --locked -j 2 rejected_initial_rate_falls_back_and_keeps_playback -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Rejected rate fallback test failed' }
+          $audioOnly = Join-Path $env:RUNNER_TEMP 'mediastrike-audio-only.wav'
+          $audioOnlyGst = $audioOnly.Replace('\', '/')
+          & gst-launch-1.0.exe -q audiotestsrc wave=sine num-buffers=80 samplesperbuffer=1600 ! 'audio/x-raw,format=S16LE,channels=1,rate=16000' ! wavenc ! filesink "location=$audioOnlyGst"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $audioOnly)) { throw 'Audio-only fixture generation failed' }
+          if ((Get-Item $audioOnly).Length -gt 1MB) { throw 'Audio-only fixture exceeds 1 MiB cap' }
+          $env:PLAYSTRIKE_AUDIO_ONLY = $audioOnly
+          cargo test --locked -j 2 audio_only_rate_uses_pipeline_fallback -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Audio-only rate fallback test failed' }
+          $avTiming = Join-Path $env:RUNNER_TEMP 'mediastrike-av-timing.mkv'
+          $avTimingGst = $avTiming.Replace('\', '/')
+          & gst-launch-1.0.exe -q -e matroskamux name=mux ! filesink "location=$avTimingGst" `
+            videotestsrc pattern=ball num-buffers=80 ! 'video/x-raw,format=BGR,width=64,height=64,framerate=10/1' ! queue ! mux.video_0 `
+            audiotestsrc wave=sine num-buffers=80 samplesperbuffer=1600 ! 'audio/x-raw,format=S16LE,channels=1,rate=16000' ! queue ! mux.audio_0
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $avTiming)) { throw 'A/V timing fixture generation failed' }
+          if ((Get-Item $avTiming).Length -gt 3MB) { throw 'A/V timing fixture exceeds 3 MiB cap' }
+          $env:PLAYSTRIKE_AV_TIMING_VIDEO = $avTiming
+          cargo test --locked -j 2 audio_video_timestamps_align_at_supported_rates -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'A/V timestamp alignment test failed' }
+          cargo test --locked -j 2 rate_during_malformed_subtitle_recovery -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Rate change during malformed subtitle recovery test failed' }
+          cargo test --locked -j 2 mute_and_speed_buttons_accept_egui_pointer_events -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Egui pointer control activation test failed' }
+          # Best-effort native renderer probe. Hosted runners may not expose a desktop.
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          "source=$env:GITHUB_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
+          foreach ($view in @('normal', 'focus')) {
+            $capture = Join-Path $env:RUNNER_TEMP "mediastrike-$view-control-preview.png"
+            $arguments = @($avTiming, '--capture', $capture)
+            if ($view -eq 'focus') { $arguments = @($avTiming, '--focus-view', '--capture', $capture) }
+            try {
+              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden
+              if (-not $app.WaitForExit(20000)) {
+                $app.Kill()
+                $app.WaitForExit()
+                "$view=timeout" | Add-Content artifact/capture-probe.txt -Encoding ascii
+              } elseif ($app.ExitCode -eq 0 -and (Test-Path -LiteralPath $capture)) {
+                if ((Get-Item -LiteralPath $capture).Length -gt 1MB) { throw 'Capture exceeds 1 MiB cap' }
+                Copy-Item -LiteralPath $capture -Destination "artifact/control-$view.png"
+                "$view=captured sha256=$((Get-FileHash -LiteralPath $capture -Algorithm SHA256).Hash)" | Add-Content artifact/capture-probe.txt -Encoding ascii
+              } else {
+                "$view=unavailable exit=$($app.ExitCode)" | Add-Content artifact/capture-probe.txt -Encoding ascii
+              }
+            } catch {
+              "$view=unavailable error=$($_.Exception.GetType().Name)" | Add-Content artifact/capture-probe.txt -Encoding ascii
+            }
+          }
+          Get-Content artifact/capture-probe.txt
           cargo test --locked -j 2 subtitle_file_choice_keeps_playback_on_cancel_and_async_failure -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Subtitle file state and async failure test failed' }
           $embeddedA = Join-Path $env:RUNNER_TEMP 'mediastrike-embedded-a.srt'
@@ -130,5 +191,7 @@ jobs:
             target/debug/playstrike.exe
             artifact/SHA256.txt
             artifact/SOURCE.txt
+            artifact/capture-probe.txt
+            artifact/control-*.png
           if-no-files-found: error
           retention-days: 1

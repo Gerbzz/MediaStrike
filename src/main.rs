@@ -102,6 +102,10 @@ struct MediaStrike {
     gst_ready: bool,
     capture: Option<CaptureOnce>,
     pending_subtitle_load: Option<PendingSubtitleLoad>,
+    #[cfg(test)]
+    ui_mute_rect: Option<egui::Rect>,
+    #[cfg(test)]
+    ui_speed_rect: Option<egui::Rect>,
 }
 
 impl MediaStrike {
@@ -144,6 +148,10 @@ impl MediaStrike {
             gst_ready,
             capture,
             pending_subtitle_load: None,
+            #[cfg(test)]
+            ui_mute_rect: None,
+            #[cfg(test)]
+            ui_speed_rect: None,
         };
         if app.gst_ready && !media_paths.is_empty() {
             app.enqueue_media(media_paths, true, cc.egui_ctx.clone());
@@ -588,6 +596,11 @@ impl MediaStrike {
         if self.player.is_none() {
             self.set_focus_view(false, ctx);
         }
+        #[cfg(test)]
+        {
+            self.ui_mute_rect = None;
+            self.ui_speed_rect = None;
+        }
         let dropped: Vec<_> = ctx.input(|input| {
             input
                 .raw
@@ -687,10 +700,15 @@ impl MediaStrike {
                                 }
                             }
                             next_clicked = ui.button("Next").clicked();
-                            mute_clicked = ui
-                                .button(if self.muted { "Unmute" } else { "Mute" })
-                                .clicked();
-                            speed_clicked = ui.button(format!("Speed {:.1}×", self.speed)).clicked();
+                            let mute_button = ui.button(if self.muted { "Unmute" } else { "Mute" });
+                            let speed_button = ui.button(format!("Speed {:.1}×", self.speed));
+                            #[cfg(test)]
+                            {
+                                self.ui_mute_rect = Some(mute_button.rect);
+                                self.ui_speed_rect = Some(speed_button.rect);
+                            }
+                            mute_clicked = mute_button.clicked();
+                            speed_clicked = speed_button.clicked();
                             let position = player.position().unwrap_or(0.0);
                             let duration = player.duration().filter(|time| *time > 0.0);
                             if let Some(duration) = duration {
@@ -812,10 +830,15 @@ impl MediaStrike {
                                 }
                             }
                             ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
-                            mute_clicked = ui
-                                .button(if self.muted { "Unmute" } else { "Mute" })
-                                .clicked();
-                            speed_clicked = ui.button(format!("Speed {:.1}×", self.speed)).clicked();
+                            let mute_button = ui.button(if self.muted { "Unmute" } else { "Mute" });
+                            let speed_button = ui.button(format!("Speed {:.1}×", self.speed));
+                            #[cfg(test)]
+                            {
+                                self.ui_mute_rect = Some(mute_button.rect);
+                                self.ui_speed_rect = Some(speed_button.rect);
+                            }
+                            mute_clicked = mute_button.clicked();
+                            speed_clicked = speed_button.clicked();
                             ui.separator();
                             let subtitle_tracks = player.subtitle_tracks().to_vec();
                             let active_subtitle = player.selected_subtitle().map(str::to_owned);
@@ -1268,6 +1291,8 @@ mod tests {
             gst_ready: true,
             capture: None,
             pending_subtitle_load: None,
+            ui_mute_rect: None,
+            ui_speed_rect: None,
         }
     }
 
@@ -1416,6 +1441,107 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    #[test]
+    #[ignore = "requires generated local audio/video via PLAYSTRIKE_MUTE_AUDIO_VIDEO"]
+    fn mute_and_speed_buttons_accept_egui_pointer_events() {
+        gstreamer::init().expect("GStreamer runtime");
+        let media = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_MUTE_AUDIO_VIDEO").expect("audio/video fixture"),
+        );
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![media.clone()], true, ctx.clone());
+        let caps = gstreamer::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("rate", 16000i32)
+            .field("channels", 1i32)
+            .build();
+        let audio_sink = gstreamer_app::AppSink::builder()
+            .caps(&caps)
+            .sync(true)
+            .max_buffers(2)
+            .drop(true)
+            .build();
+        app.player = Some(
+            super::Player::open_with_test_audio_sink(
+                &media, None, ctx.clone(), 0.8, false, 1.0, &audio_sink,
+            )
+            .expect("open synthetic A/V for UI pointer test"),
+        );
+        app.error = None;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app.player.as_ref().is_none_or(|player| {
+                player.duration().is_none() || player.position().is_none()
+            })
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.player.as_ref().unwrap().position().is_some());
+        app.toggle();
+        assert!(!app.player.as_ref().unwrap().playing);
+
+        fn click(app: &mut MediaStrike, ctx: &egui::Context, rect: egui::Rect) {
+            let position = rect.center();
+            eprintln!("egui pointer target: rect={rect:?} center={position:?}");
+            player_ui_frame(app, ctx, vec![egui::Event::PointerMoved(position)]);
+            player_ui_frame(app, ctx, vec![pointer_button(position, true)]);
+            player_ui_frame(app, ctx, vec![pointer_button(position, false)]);
+        }
+
+        fn visible_button(app: &mut MediaStrike, ctx: &egui::Context, speed: bool) -> egui::Rect {
+            let mut last = None;
+            for _ in 0..5 {
+                player_ui_frame(app, ctx, vec![]);
+                assert!(
+                    app.player.is_some(),
+                    "player lost before UI click: status={} error={:?}",
+                    app.status,
+                    app.error
+                );
+                let rect = if speed { app.ui_speed_rect } else { app.ui_mute_rect };
+                if let Some(rect) = rect {
+                    last = Some(rect);
+                    if rect.min.x >= 0.0
+                        && rect.min.y >= 0.0
+                        && rect.max.x <= 1120.0
+                        && rect.max.y <= 720.0
+                    {
+                        return rect;
+                    }
+                }
+            }
+            panic!("button never settled inside viewport: {last:?}");
+        }
+
+        let mute = visible_button(&mut app, &ctx, false);
+        click(&mut app, &ctx, mute);
+        assert!(app.muted && app.player.as_ref().unwrap().muted());
+        eprintln!("normal Mute click: muted={} speed={}", app.muted, app.speed);
+
+        for expected in [1.5, 2.0, 0.5, 1.0] {
+            let speed = visible_button(&mut app, &ctx, true);
+            click(&mut app, &ctx, speed);
+            assert_eq!(app.speed, expected, "Speed click must cycle preset");
+            wait_for_speed(&mut app, &ctx, expected);
+            assert!(app.player.as_ref().unwrap().muted());
+            eprintln!("normal Speed click: muted={} speed={}", app.muted, app.speed);
+        }
+
+        app.set_focus_view(true, &ctx);
+        let unmute = visible_button(&mut app, &ctx, false);
+        click(&mut app, &ctx, unmute);
+        assert!(!app.muted && !app.player.as_ref().unwrap().muted());
+        let speed = visible_button(&mut app, &ctx, true);
+        click(&mut app, &ctx, speed);
+        assert_eq!(app.speed, 1.5);
+        wait_for_speed(&mut app, &ctx, 1.5);
+        assert!(app.focus_view);
+        assert!(!app.player.as_ref().unwrap().playing);
+        eprintln!("focus UI clicks: muted={} speed={}", app.muted, app.speed);
     }
 
     #[test]
@@ -1647,6 +1773,59 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires generated local video and malformed SRT via PLAYSTRIKE_SUBTITLE_VIDEO and PLAYSTRIKE_SUBTITLE_MALFORMED"]
+    fn rate_during_malformed_subtitle_recovery() {
+        gstreamer::init().expect("GStreamer runtime");
+        let media = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("video"));
+        let malformed = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_SUBTITLE_MALFORMED").expect("malformed subtitle"),
+        );
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![media.clone()], true, ctx.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app.player.as_ref().is_none_or(|player| {
+                player.duration().is_none() || player.position().is_none()
+            })
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.player.as_ref().unwrap().position().is_some());
+        app.toggle();
+        app.toggle_mute();
+        app.cycle_speed();
+        wait_for_speed(&mut app, &ctx, 1.5);
+
+        app.load_external_subtitle(malformed, ctx.clone())
+            .expect("start malformed subtitle candidate");
+        assert!(app.pending_subtitle_load.is_some());
+        app.cycle_speed();
+        assert_eq!(app.speed, 2.0);
+        assert!(app.pending_subtitle_load.is_some());
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline && app.pending_subtitle_load.is_some() {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.pending_subtitle_load.is_none(), "candidate did not fail");
+        assert!(
+            app.error
+                .as_ref()
+                .is_some_and(|error| error.starts_with("Subtitle loading failed:")),
+            "expected failed subtitle recovery: {:?}",
+            app.error
+        );
+        wait_for_speed(&mut app, &ctx, 2.0);
+        let original = app.player.as_ref().expect("original player remains");
+        assert_eq!(original.path, media);
+        assert!(!original.playing);
+        assert!(app.muted && original.muted());
+        eprintln!("malformed subtitle recovery: speed={} muted={}", app.speed, app.muted);
+    }
+
+    #[test]
     #[ignore = "requires generated local videos and SRT via PLAYSTRIKE_SUBTITLE_VIDEO, PLAYSTRIKE_SAMPLE, and PLAYSTRIKE_SUBTITLE_SAMPLE"]
     fn playback_speed_survives_seek_queue_subtitle_and_focus() {
         gstreamer::init().expect("GStreamer runtime");
@@ -1712,6 +1891,156 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires generated PCM Matroska and malformed SRT via PLAYSTRIKE_MUTE_AUDIO_VIDEO and PLAYSTRIKE_SUBTITLE_MALFORMED"]
+    fn muted_pcm_survives_app_subtitle_failure() {
+        use gstreamer as gst;
+        use gstreamer_app as gst_app;
+
+        fn drain(sink: &gst_app::AppSink) {
+            while sink.try_pull_sample(gst::ClockTime::ZERO).is_some() {}
+        }
+
+        fn assert_silent(sample: &gst::Sample, phase: &str) {
+            let buffer = sample.buffer().expect("audio sample buffer");
+            let map = buffer.map_readable().expect("readable PCM");
+            let bytes = map.as_slice();
+            assert!(!bytes.is_empty(), "{phase}: empty PCM sample");
+            assert!(
+                bytes.iter().all(|byte| *byte == 0),
+                "{phase}: nonzero PCM reached the original player sink"
+            );
+        }
+
+        fn collect_silence(
+            app: &mut MediaStrike,
+            sink: &gst_app::AppSink,
+            ctx: &egui::Context,
+            phase: &str,
+        ) {
+            let deadline = Instant::now() + Duration::from_secs(4);
+            let mut checked = 0;
+            while Instant::now() < deadline && checked < 3 {
+                app.refresh_player(ctx);
+                if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(200)) {
+                    assert_silent(&sample, phase);
+                    checked += 1;
+                }
+            }
+            assert_eq!(checked, 3, "{phase}: no bounded PCM output to inspect");
+        }
+
+        gst::init().expect("GStreamer runtime");
+        let media = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_MUTE_AUDIO_VIDEO").expect("PCM fixture"),
+        );
+        let malformed = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_SUBTITLE_MALFORMED").expect("malformed SRT"),
+        );
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("rate", 16000i32)
+            .field("channels", 1i32)
+            .build();
+        let sink = gst_app::AppSink::builder()
+            .caps(&caps)
+            .sync(true)
+            .max_buffers(2)
+            .drop(true)
+            .build();
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.muted = true;
+        app.enqueue_media(vec![media.clone()], true, ctx.clone());
+        assert!(app.error.is_none(), "initial open failed: {:?}", app.error);
+        assert_eq!(app.player.as_ref().unwrap().path, media);
+        // Replace only the test player's sink; app subtitle selection and
+        // failure handling below still run through the normal MediaStrike path.
+        app.player = Some(
+            super::Player::open_with_test_audio_sink(&media, None, ctx.clone(), 0.8, true, 1.0, &sink)
+                .expect("instrument original player"),
+        );
+        assert_eq!(app.player.as_ref().unwrap().volume, 0.8);
+        assert!(app.player.as_ref().unwrap().muted());
+        collect_silence(&mut app, &sink, &ctx, "before subtitle load");
+
+        app.load_external_subtitle(malformed, ctx.clone())
+            .expect("start malformed subtitle candidate");
+        // Clear already delivered PCM, then flush-seek the original pipeline.
+        // The next sink samples belong to output after the app began loading.
+        drain(&sink);
+        app.player
+            .as_ref()
+            .unwrap()
+            .seek(0.0)
+            .expect("flush original during candidate load");
+        drain(&sink);
+        assert!(app.pending_subtitle_load.is_some());
+        assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
+        assert_eq!(
+            app.pending_subtitle_load.as_ref().unwrap().player.volume,
+            0.0,
+            "candidate starts at zero volume to prevent transient output"
+        );
+        // Inspect the original sink while the app handles the asynchronous
+        // candidate failure. Candidate volume is not used as mute evidence.
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut sampled_after_request = false;
+        while Instant::now() < deadline
+            && (!sampled_after_request || app.pending_subtitle_load.is_some())
+        {
+            // Keep the candidate pending until a post-request buffer arrives.
+            // A quick malformed-file failure must not end the sampling window.
+            if !sampled_after_request {
+                if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
+                    assert_silent(&sample, "after subtitle load request");
+                    sampled_after_request = true;
+                }
+            }
+            if sampled_after_request && app.pending_subtitle_load.is_some() {
+                app.refresh_player(&ctx);
+            }
+        }
+        assert!(
+            sampled_after_request,
+            "original sink produced no post-request PCM within six seconds"
+        );
+        assert!(app.pending_subtitle_load.is_none(), "candidate did not settle");
+        assert!(
+            app.error
+                .as_ref()
+                .is_some_and(|error| error.starts_with("Subtitle loading failed:")),
+            "expected app-level asynchronous failure: {:?}",
+            app.error
+        );
+        assert_eq!(app.status, "Kept the current playback");
+        let original = app.player.as_ref().expect("original player remains");
+        assert_eq!(original.path, media);
+        assert_eq!(original.external_subtitle(), None);
+        assert_eq!(original.volume, 0.8);
+        assert!(app.muted && original.muted());
+
+        original.seek(0.0).expect("restart original after failure");
+        drain(&sink);
+        collect_silence(&mut app, &sink, &ctx, "after candidate failure");
+
+        app.toggle_mute();
+        assert!(!app.muted && !app.player.as_ref().unwrap().muted());
+        app.player.as_ref().unwrap().seek(0.0).expect("positive control");
+        drain(&sink);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut saw_nonzero = false;
+        while Instant::now() < deadline && !saw_nonzero {
+            app.refresh_player(&ctx);
+            if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(200)) {
+                let buffer = sample.buffer().expect("audio sample buffer");
+                let map = buffer.map_readable().expect("readable PCM");
+                saw_nonzero = map.as_slice().iter().any(|byte| *byte != 0);
+            }
+        }
+        assert!(saw_nonzero, "unmuted original produced no nonzero PCM");
+    }
+
+    #[test]
     #[ignore = "requires generated local videos and SRT via PLAYSTRIKE_SUBTITLE_VIDEO, PLAYSTRIKE_SAMPLE, and PLAYSTRIKE_SUBTITLE_SAMPLE"]
     fn mute_survives_queue_and_subtitle_replacement() {
         gstreamer::init().expect("GStreamer runtime");
@@ -1730,6 +2059,23 @@ mod tests {
         app.previous_track(ctx.clone());
         assert_eq!(app.player.as_ref().unwrap().path, video);
         assert!(app.player.as_ref().unwrap().muted());
+        // Let the replacement after Previous finish preroll before opening
+        // another pipeline; the queue transition itself was checked above.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app.player.as_ref().is_some_and(|player| {
+                !player.prerolled() || player.duration().is_none()
+            })
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            app.player
+                .as_ref()
+                .is_some_and(|player| player.prerolled() && player.duration().is_some()),
+            "queue replacement did not preroll before subtitle load"
+        );
         app.load_external_subtitle(subtitle, ctx.clone()).expect("load SRT");
         assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
         app.toggle_mute();
