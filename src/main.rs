@@ -1570,6 +1570,137 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires generated PCM Matroska and malformed SRT via PLAYSTRIKE_MUTE_AUDIO_VIDEO and PLAYSTRIKE_SUBTITLE_MALFORMED"]
+    fn muted_pcm_survives_app_subtitle_failure() {
+        use gstreamer as gst;
+        use gstreamer::prelude::*;
+        use gstreamer_app as gst_app;
+
+        fn drain(sink: &gst_app::AppSink) {
+            while sink.try_pull_sample(gst::ClockTime::ZERO).is_some() {}
+        }
+
+        fn assert_silent(sample: &gst::Sample, phase: &str) {
+            let buffer = sample.buffer().expect("audio sample buffer");
+            let map = buffer.map_readable().expect("readable PCM");
+            let bytes = map.as_slice();
+            assert!(!bytes.is_empty(), "{phase}: empty PCM sample");
+            assert!(
+                bytes.iter().all(|byte| *byte == 0),
+                "{phase}: nonzero PCM reached the original player sink"
+            );
+        }
+
+        fn collect_silence(
+            app: &mut MediaStrike,
+            sink: &gst_app::AppSink,
+            ctx: &egui::Context,
+            phase: &str,
+        ) {
+            let deadline = Instant::now() + Duration::from_secs(4);
+            let mut checked = 0;
+            while Instant::now() < deadline && checked < 3 {
+                app.refresh_player(ctx);
+                if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(200)) {
+                    assert_silent(&sample, phase);
+                    checked += 1;
+                }
+            }
+            assert_eq!(checked, 3, "{phase}: no bounded PCM output to inspect");
+        }
+
+        gst::init().expect("GStreamer runtime");
+        let media = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_MUTE_AUDIO_VIDEO").expect("PCM fixture"),
+        );
+        let malformed = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_SUBTITLE_MALFORMED").expect("malformed SRT"),
+        );
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("rate", 16000i32)
+            .field("channels", 1i32)
+            .build();
+        let sink = gst_app::AppSink::builder()
+            .caps(&caps)
+            .sync(true)
+            .max_buffers(2)
+            .drop(true)
+            .build();
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.muted = true;
+        app.enqueue_media(vec![media.clone()], true, ctx.clone());
+        assert!(app.error.is_none(), "initial open failed: {:?}", app.error);
+        assert_eq!(app.player.as_ref().unwrap().path, media);
+        // Replace only the test player's sink; app subtitle selection and
+        // failure handling below still run through the normal MediaStrike path.
+        app.player = Some(
+            Player::open_with_test_audio_sink(&media, None, ctx.clone(), 0.8, true, &sink)
+                .expect("instrument original player"),
+        );
+        assert_eq!(app.player.as_ref().unwrap().volume, 0.8);
+        assert!(app.player.as_ref().unwrap().muted());
+        collect_silence(&mut app, &sink, &ctx, "before subtitle load");
+
+        app.load_external_subtitle(malformed, ctx.clone())
+            .expect("start malformed subtitle candidate");
+        assert!(app.pending_subtitle_load.is_some());
+        assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
+        assert_eq!(
+            app.pending_subtitle_load.as_ref().unwrap().player.volume,
+            0.0,
+            "candidate starts at zero volume to prevent transient output"
+        );
+        // Inspect the original sink while the app handles the asynchronous
+        // candidate failure. Candidate volume is not used as mute evidence.
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut during = 0;
+        while Instant::now() < deadline && app.pending_subtitle_load.is_some() {
+            if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
+                assert_silent(&sample, "during failed subtitle load");
+                during += 1;
+            }
+            app.refresh_player(&ctx);
+        }
+        assert!(during > 0, "original sink produced no PCM during candidate load");
+        assert!(app.pending_subtitle_load.is_none(), "candidate did not settle");
+        assert!(
+            app.error
+                .as_ref()
+                .is_some_and(|error| error.starts_with("Subtitle loading failed:")),
+            "expected app-level asynchronous failure: {:?}",
+            app.error
+        );
+        assert_eq!(app.status, "Kept the current playback");
+        let original = app.player.as_ref().expect("original player remains");
+        assert_eq!(original.path, media);
+        assert_eq!(original.external_subtitle(), None);
+        assert_eq!(original.volume, 0.8);
+        assert!(app.muted && original.muted());
+
+        original.seek(0.0).expect("restart original after failure");
+        drain(&sink);
+        collect_silence(&mut app, &sink, &ctx, "after candidate failure");
+
+        app.toggle_mute();
+        assert!(!app.muted && !app.player.as_ref().unwrap().muted());
+        app.player.as_ref().unwrap().seek(0.0).expect("positive control");
+        drain(&sink);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut saw_nonzero = false;
+        while Instant::now() < deadline && !saw_nonzero {
+            app.refresh_player(&ctx);
+            if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(200)) {
+                let buffer = sample.buffer().expect("audio sample buffer");
+                let map = buffer.map_readable().expect("readable PCM");
+                saw_nonzero = map.as_slice().iter().any(|byte| *byte != 0);
+            }
+        }
+        assert!(saw_nonzero, "unmuted original produced no nonzero PCM");
+    }
+
+    #[test]
     #[ignore = "requires generated local videos and SRT via PLAYSTRIKE_SUBTITLE_VIDEO, PLAYSTRIKE_SAMPLE, and PLAYSTRIKE_SUBTITLE_SAMPLE"]
     fn mute_survives_queue_and_subtitle_replacement() {
         gstreamer::init().expect("GStreamer runtime");
