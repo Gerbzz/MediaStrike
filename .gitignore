@@ -1,4 +1,8 @@
 /target
 /verification/*.webm
 /verification/*.avi
+/verification/*.mkv
 /verification/*.png
+/verification/*.srt
+/verification/*.vtt
+/verification/hosted-*/

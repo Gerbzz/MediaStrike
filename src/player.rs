@@ -3,6 +3,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -10,6 +11,12 @@ pub struct Frame {
     pub width: usize,
     pub height: usize,
     pub rgba: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubtitleTrack {
+    pub id: String,
+    pub label: String,
 }
 
 pub struct Player {
@@ -20,13 +27,30 @@ pub struct Player {
     pub path: PathBuf,
     pub playing: bool,
     pub volume: f64,
+    subtitle_tracks: Vec<SubtitleTrack>,
+    selected_non_text: Vec<String>,
+    selected_subtitle: Option<String>,
+    subtitles_enabled: bool,
+    streams_selected: bool,
+    prerolled: bool,
+    external_subtitle: Option<PathBuf>,
 }
 
 impl Player {
     pub fn open(path: &Path, ctx: egui::Context, volume: f64) -> Result<Self, String> {
+        Self::open_with_subtitle(path, None, ctx, volume)
+    }
+
+    pub fn open_with_subtitle(
+        path: &Path,
+        subtitle: Option<&Path>,
+        ctx: egui::Context,
+        volume: f64,
+    ) -> Result<Self, String> {
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
         }
+        let external = subtitle.map(subtitle_uri).transpose()?;
         let absolute = path
             .canonicalize()
             .map_err(|e| format!("Cannot resolve {}: {e}", path.display()))?;
@@ -67,6 +91,9 @@ impl Player {
                 .build(),
         );
         pipeline.set_property("uri", uri.as_str());
+        if let Some((_, subtitle_uri)) = &external {
+            pipeline.set_property("suburi", subtitle_uri.as_str());
+        }
         pipeline.set_property("video-sink", &sink);
         pipeline.set_property("volume", volume.clamp(0.0, 1.0));
         if let Err(error) = pipeline.set_state(gst::State::Playing) {
@@ -81,7 +108,101 @@ impl Player {
             path: path.to_path_buf(),
             playing: true,
             volume,
+            subtitle_tracks: Vec::new(),
+            selected_non_text: Vec::new(),
+            selected_subtitle: None,
+            subtitles_enabled: true,
+            streams_selected: false,
+            prerolled: false,
+            external_subtitle: external.map(|(path, _)| path),
         })
+    }
+
+    pub fn subtitle_tracks(&self) -> &[SubtitleTrack] {
+        &self.subtitle_tracks
+    }
+
+    pub fn selected_subtitle(&self) -> Option<&str> {
+        if self.subtitles_enabled {
+            self.selected_subtitle.as_deref()
+        } else {
+            None
+        }
+    }
+
+    pub fn external_subtitle(&self) -> Option<&Path> {
+        self.external_subtitle.as_deref()
+    }
+
+    pub fn subtitle_selection_ready(&self) -> bool {
+        self.streams_selected
+    }
+
+    pub fn prerolled(&self) -> bool {
+        self.prerolled
+    }
+
+    pub fn select_subtitle(&mut self, id: Option<&str>) -> Result<(), String> {
+        if !self.streams_selected {
+            return Err("Subtitle tracks are still loading".to_owned());
+        }
+        if let Some(id) = id {
+            if !self.subtitle_tracks.iter().any(|track| track.id == id) {
+                return Err("This subtitle track is no longer available".to_owned());
+            }
+        }
+        let Some(id) = id else {
+            self.set_text_output(false)?;
+            self.subtitles_enabled = false;
+            return Ok(());
+        };
+        self.set_text_output(true)?;
+        let mut ids = self.selected_non_text.clone();
+        ids.push(id.to_owned());
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        if !self
+            .pipeline
+            .send_event(gst::event::SelectStreams::new(&ids))
+        {
+            return Err("GStreamer did not accept the subtitle selection".to_owned());
+        }
+        self.subtitles_enabled = true;
+        Ok(())
+    }
+
+    fn set_text_output(&self, enabled: bool) -> Result<(), String> {
+        let flags = self.pipeline.property_value("flags");
+        let class = gst::glib::FlagsClass::with_type(flags.type_())
+            .ok_or("GStreamer does not expose playback flags")?;
+        let changed = if enabled {
+            class.set_by_nick(flags, "text")
+        } else {
+            class.unset_by_nick(flags, "text")
+        }
+        .map_err(|_| "GStreamer cannot change subtitle output")?;
+        self.pipeline.set_property_from_value("flags", &changed);
+        Ok(())
+    }
+
+    fn collect_streams(&mut self, collection: &gst::StreamCollection) {
+        for index in 0..collection.size() {
+            let Some(stream) = collection.stream(index) else {
+                continue;
+            };
+            if !stream.stream_type().contains(gst::StreamType::TEXT) {
+                continue;
+            }
+            let Some(id) = stream.stream_id().map(|id| id.to_string()) else {
+                continue;
+            };
+            if self.subtitle_tracks.iter().any(|track| track.id == id) {
+                continue;
+            }
+            self.subtitle_tracks.push(SubtitleTrack {
+                id,
+                label: format!("Subtitle track {}", self.subtitle_tracks.len() + 1),
+            });
+        }
     }
 
     pub fn toggle(&mut self) -> Result<(), String> {
@@ -143,6 +264,26 @@ impl Player {
         }
         while let Some(message) = self.bus.pop() {
             match message.view() {
+                gst::MessageView::StreamCollection(collection) => {
+                    self.collect_streams(&collection.stream_collection());
+                }
+                gst::MessageView::StreamsSelected(selected) => {
+                    self.collect_streams(&selected.stream_collection());
+                    self.selected_non_text.clear();
+                    self.selected_subtitle = None;
+                    for stream in selected.streams() {
+                        let Some(id) = stream.stream_id() else {
+                            continue;
+                        };
+                        if stream.stream_type().contains(gst::StreamType::TEXT) {
+                            self.selected_subtitle = Some(id.to_string());
+                        } else {
+                            self.selected_non_text.push(id.to_string());
+                        }
+                    }
+                    self.streams_selected = true;
+                }
+                gst::MessageView::AsyncDone(..) => self.prerolled = true,
                 gst::MessageView::Error(error) => {
                     self.playing = false;
                     return Some(Err(format!("Playback failed: {}", error.error())));
@@ -158,6 +299,30 @@ impl Player {
         }
         None
     }
+}
+
+fn subtitle_uri(path: &Path) -> Result<(PathBuf, String), String> {
+    if !path.is_file() {
+        return Err(format!("Subtitle file not found: {}", path.display()));
+    }
+    let supported = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("srt") || extension.eq_ignore_ascii_case("vtt")
+        });
+    if !supported {
+        return Err("Only local .srt and .vtt subtitle files are supported".to_owned());
+    }
+    if fs::metadata(path).map_err(|error| error.to_string())?.len() == 0 {
+        return Err("Subtitle file is empty".to_owned());
+    }
+    let absolute = path
+        .canonicalize()
+        .map_err(|error| format!("Cannot resolve subtitle file: {error}"))?;
+    let uri = url::Url::from_file_path(&absolute)
+        .map_err(|_| "Cannot form a local subtitle URI".to_owned())?;
+    Ok((absolute, uri.to_string()))
 }
 
 impl Drop for Player {
@@ -224,12 +389,29 @@ fn tight_rgba(source: &[u8], width: usize, height: usize, stride: usize) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{Player, tight_rgba};
+    use super::{Player, subtitle_uri, tight_rgba};
     use gstreamer as gst;
     use gstreamer::glib::prelude::ObjectExt;
     use gstreamer::prelude::*;
     use std::path::Path;
     use std::time::{Duration, Instant};
+
+    fn text_output_enabled(player: &Player) -> bool {
+        let flags = player.pipeline.property_value("flags");
+        let class = gst::glib::FlagsClass::with_type(flags.type_()).unwrap();
+        class.is_set_by_nick(&flags, "text")
+    }
+
+    fn wait_for_selected_track(player: &mut Player, track_id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && player.selected_subtitle() != Some(track_id) {
+            if let Some(event) = player.poll_event() {
+                event.expect("subtitle stream switch should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.selected_subtitle(), Some(track_id));
+    }
 
     #[test]
     fn removes_video_row_padding_without_mixing_rows() {
@@ -239,6 +421,114 @@ mod tests {
             Some(vec![1, 2, 3, 4, 5, 6, 7, 8])
         );
         assert_eq!(tight_rgba(&source[..7], 1, 2, 6), None);
+    }
+
+    #[test]
+    fn missing_subtitle_file_has_a_clear_error() {
+        let error = subtitle_uri(Path::new("missing-subtitle-file.srt")).unwrap_err();
+        assert!(error.starts_with("Subtitle file not found:"));
+    }
+
+    #[test]
+    #[ignore = "requires a generated local AVI and SRT via PLAYSTRIKE_SUBTITLE_VIDEO and PLAYSTRIKE_SUBTITLE_SAMPLE"]
+    fn discovers_and_switches_external_subtitle_track() {
+        gstreamer::init().expect("GStreamer runtime");
+        let video = std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("subtitle video");
+        let subtitle = std::env::var_os("PLAYSTRIKE_SUBTITLE_SAMPLE").expect("subtitle SRT");
+        let mut player = Player::open_with_subtitle(
+            Path::new(&video),
+            Some(Path::new(&subtitle)),
+            eframe::egui::Context::default(),
+            0.2,
+        )
+        .expect("open synthetic video with SRT");
+        let canonical_subtitle = Path::new(&subtitle).canonicalize().unwrap();
+        assert_eq!(
+            player.external_subtitle(),
+            Some(canonical_subtitle.as_path())
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && (!player.subtitle_selection_ready() || player.subtitle_tracks().is_empty())
+        {
+            if let Some(event) = player.poll_event() {
+                event.expect("subtitle discovery should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(player.subtitle_selection_ready());
+        let track = player
+            .subtitle_tracks()
+            .first()
+            .expect("external SRT should create a text stream")
+            .id
+            .clone();
+        assert!(player.select_subtitle(Some("not-a-stream-id")).is_err());
+        assert!(text_output_enabled(&player));
+
+        player.select_subtitle(None).expect("turn subtitles off");
+        let off_deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < off_deadline && player.selected_subtitle().is_some() {
+            if let Some(event) = player.poll_event() {
+                event.expect("subtitle off should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.selected_subtitle(), None);
+        assert!(!text_output_enabled(&player));
+
+        player
+            .select_subtitle(Some(&track))
+            .expect("select discovered subtitle track");
+        let on_deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < on_deadline && player.selected_subtitle() != Some(track.as_str()) {
+            if let Some(event) = player.poll_event() {
+                event.expect("subtitle selection should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.selected_subtitle(), Some(track.as_str()));
+        assert!(text_output_enabled(&player));
+    }
+
+    #[test]
+    #[ignore = "requires a generated Matroska fixture via PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO"]
+    fn discovers_switches_and_disables_two_embedded_tracks() {
+        gst::init().expect("GStreamer runtime");
+        let path = std::env::var_os("PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO")
+            .expect("embedded subtitle Matroska fixture");
+        let mut player = Player::open(Path::new(&path), eframe::egui::Context::default(), 0.2)
+            .expect("open synthetic Matroska fixture");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && (!player.subtitle_selection_ready() || player.subtitle_tracks().len() < 2)
+        {
+            if let Some(event) = player.poll_event() {
+                event.expect("embedded subtitle discovery should not fail");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.subtitle_tracks().len(), 2);
+        let first = player.subtitle_tracks()[0].id.clone();
+        let second = player.subtitle_tracks()[1].id.clone();
+        assert_ne!(first, second);
+
+        player
+            .select_subtitle(Some(&first))
+            .expect("select first track");
+        wait_for_selected_track(&mut player, &first);
+        player
+            .select_subtitle(Some(&second))
+            .expect("switch to second track");
+        wait_for_selected_track(&mut player, &second);
+        player.select_subtitle(None).expect("turn text output off");
+        assert_eq!(player.selected_subtitle(), None);
+        assert!(!text_output_enabled(&player));
+        player
+            .select_subtitle(Some(&first))
+            .expect("restore first track");
+        wait_for_selected_track(&mut player, &first);
+        assert!(text_output_enabled(&player));
     }
 
     #[test]

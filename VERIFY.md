@@ -41,6 +41,12 @@ Check that a video frame appears in the MediaStrike window and the quiet audio p
 
 The [queue-layout renderer capture](assets/screenshots/mediastrike-queue-preview.png) shows two synthetic AVIs in the session queue and one decoded frame. Its [provenance](docs/QUEUE_CAPTURE_PROVENANCE.md) records the source, executable, fixture, and PNG hashes. The [earlier draft capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) is preserved for comparison. Repeat a visible review for the interactive and audible checks above.
 
+The fresh [SRT](assets/screenshots/mediastrike-subtitles-srt-c48564e.png) and [WebVTT](assets/screenshots/mediastrike-subtitles-vtt-c48564e.png) renderer captures show visible captions from the verified follow-up app source and synthetic local files. Their [provenance](docs/SUBTITLE_FINAL_CAPTURE_PROVENANCE.md) records the exact hosted source and executable, inputs, and PNG hashes. [Earlier captures](docs/SUBTITLE_CAPTURE_PROVENANCE.md) remain preserved. These captures do not establish native menu interaction.
+
 ## 3. Exercise the session queue
 
 Launch with two local media paths, then verify that both entries appear and the first starts playing. Click the second entry and confirm the file and frame change. Use Previous and Next, then cycle Repeat off, all, and one while watching end-of-stream behavior. Add another file while playback continues, filter by filename, and confirm the selection remains visible after clearing the filter. Confirm the 1,000-item bound and invalid-file messages do not erase the current playable file. These interactions are pending; the renderer capture and Rust queue tests do not establish them.
+
+## 4. Exercise subtitle controls
+
+Open local media with a text track and use **Subtitles** to choose it and turn it Off while watching the video. Load local `.srt` and `.vtt` files through the picker; check that playback position and pause state are restored, and that an invalid or missing file gives a clear error without losing the current player. Repeat with an embedded multi-track media file when one is available. [Hosted synthetic tests](docs/SUBTITLE_FOLLOWUP_VERIFICATION.md) exercised two embedded tracks, Off, simulated file choices while playing and paused, malformed-file recovery, Repeat one, and newer choices during a pending load. The two fresh native captures exercised launch-time external files and visible rendering from the follow-up source. Pointer interaction with the actual menu and file picker, audible playback, and synchronization still need hands-on review.
