@@ -1,6 +1,6 @@
 # MediaStrike draft player screenshot provenance
 
-`assets/screenshots/mediastrike-draft-player-2026-10-15.png` is a genuine 1120 × 720 PNG returned by the MediaStrike draft application's egui/eframe renderer on 15 October 2026 UTC. It is a capture of the unmerged rename branch, not of the PlayStrike source currently on `main`. The earlier PlayStrike screenshot is preserved separately.
+`assets/screenshots/mediastrike-draft-player-2026-10-15.png` is a genuine 1120 × 720 PNG returned by the MediaStrike draft application's egui/eframe renderer on 15 October 2026 UTC. At capture time, the rename branch was unmerged and `main` still held the PlayStrike source. The earlier PlayStrike screenshot is preserved separately.
 
 | Item | Identity |
 | --- | --- |

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/branding/playstrike-lyrebird-icon.png" alt="Original PlayStrike lyrebird logo" width="160" height="160">
+  <img src="assets/branding/playstrike-lyrebird-icon.png" alt="Original lyrebird logo for MediaStrike" width="160" height="160">
 </p>
 
-# PlayStrike
+# MediaStrike
 
 <p align="center">
   <a href="https://prowebdevsolutions.com"><picture>
@@ -11,7 +11,7 @@
   </picture></a>
 </p>
 
-**Press play on media you already have.** PlayStrike is a focused Windows desktop player for local video and audio files. Open a file, drop it into the window, or pass its path when launching.
+**Press play on media you already have.** MediaStrike is a focused Windows desktop player for local video and audio files. Open a file, drop it into the window, or pass its path when launching.
 
 [How to run](#run-from-source) · [Verification](VERIFY.md) · [Original artwork](assets/branding)
 
@@ -21,7 +21,7 @@
 
 ![MediaStrike draft showing a decoded frame from a synthetic local AVI](assets/screenshots/mediastrike-draft-player-2026-10-15.png)
 
-This [app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the unmerged MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame in the native Windows player. The `main` branch still contains the PlayStrike source until the rename is merged. Transport interaction and audible output still need hands-on review.
+This [app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame in the native Windows player. Transport interaction and audible output still need hands-on review.
 
 ### Historical PlayStrike interface
 
@@ -60,11 +60,13 @@ cargo run --locked -- path\to\media.mp4
 
 Omit the media path to choose or drop a file in the window. Add `--offline` to Cargo after dependencies are cached. Check disk headroom before building and follow [VERIFY.md](VERIFY.md) for the remaining native review.
 
+The executable and Cargo package are still named `playstrike` so existing launch scripts and build commands keep working. The `PLAYSTRIKE_SAMPLE` variable used by the optional integration test is also unchanged. The application title, empty state, and About panel use **MediaStrike**.
+
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer. Offline unit tests and a headless GStreamer playback test passed. The new screenshot verifies one decoded synthetic video frame in the unmerged MediaStrike draft; the historical screenshot records the earlier PlayStrike interface. Interactive transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer. A hosted Windows build, two unit tests, and a GStreamer playback test with a small uncompressed AVI passed on the rename branch. The new screenshot verifies one decoded synthetic video frame in the MediaStrike draft; the historical screenshot records the earlier PlayStrike interface. Interactive transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
-The original [lyrebird artwork](assets/branding) is included; native app-icon integration remains pending. Distributing PlayStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
+The original [lyrebird artwork](assets/branding) is included in the start view and About panel; native app-icon integration remains pending. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
 Explore the other [PWDS Strike repositories](https://github.com/Gerbzz?tab=repositories&q=Strike).
 

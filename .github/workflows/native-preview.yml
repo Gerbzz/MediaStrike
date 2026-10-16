@@ -1,0 +1,82 @@
+name: MediaStrike native preview
+
+on:
+  push:
+    branches: [codex/mediastrike-rename]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select stable Rust
+        shell: pwsh
+        run: rustup default stable
+      - name: Install GStreamer 1.26.11 from conda-forge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $conda = Join-Path $env:CONDA 'Scripts\conda.exe'
+          $prefix = Join-Path $env:RUNNER_TEMP 'mediastrike-gstreamer'
+          & $conda create --yes --prefix $prefix --override-channels --channel conda-forge --solver libmamba 'gstreamer=1.26.11' 'gst-plugins-base=1.26.11' 'gst-plugins-good=1.26.11' pkg-config
+          if ($LASTEXITCODE -ne 0) { throw 'Conda-forge GStreamer installation failed' }
+          $gst = Join-Path $prefix 'Library'
+          if (-not (Test-Path (Join-Path $gst 'bin\pkg-config.exe'))) { throw 'Conda-forge pkg-config was not found' }
+          if (-not (Test-Path (Join-Path $gst 'bin\gst-launch-1.0.exe'))) { throw 'Conda-forge GStreamer runtime was not found' }
+          $env:PKG_CONFIG_PATH = "$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig"
+          & "$gst\bin\pkg-config.exe" --modversion gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0
+          if ($LASTEXITCODE -ne 0) { throw 'Conda-forge GStreamer development files are incomplete' }
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gst" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG=$gst\bin\pkg-config.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "GST_PLUGIN_SYSTEM_PATH=$gst\lib\gstreamer-1.0" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "$gst\bin" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Test source
+        shell: pwsh
+        run: cargo test --locked -j 2
+      - name: Build native executable
+        shell: pwsh
+        run: cargo build --locked -j 2
+      - name: Exercise decoded local playback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sample = Join-Path $env:RUNNER_TEMP 'mediastrike-sample.avi'
+          $sampleGst = $sample.Replace('\', '/')
+          & gst-launch-1.0.exe -q avimux name=mux ! filesink "location=$sampleGst" `
+            videotestsrc pattern=ball num-buffers=2 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sample)) { throw 'Synthetic AVI generation failed' }
+          if ((Get-Item $sample).Length -gt 1MB) { throw 'Synthetic AVI exceeds 1 MiB cap' }
+          $env:PLAYSTRIKE_SAMPLE = $sample
+          $env:GST_AUDIOSINK = 'fakesink'
+          cargo test --locked -j 2 decodes_and_controls_local_audio_video -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'Headless playback test failed' }
+      - name: Bound and hash executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-Item target/debug/playstrike.exe
+          if ($exe.Length -gt 120MB) { throw "Executable exceeds 120 MiB cap: $($exe.Length)" }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "$sha  playstrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
+          "commit=$env:GITHUB_SHA" | Set-Content artifact/SOURCE.txt -Encoding ascii
+          "cargo_lock_sha256=$((Get-FileHash Cargo.lock -Algorithm SHA256).Hash)" | Add-Content artifact/SOURCE.txt -Encoding ascii
+          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha; source: $env:GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mediastrike-native-preview
+          path: |
+            target/debug/playstrike.exe
+            artifact/SHA256.txt
+            artifact/SOURCE.txt
+          if-no-files-found: error
+          retention-days: 1

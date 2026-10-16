@@ -1,10 +1,10 @@
-# PlayStrike verification
+# MediaStrike verification
 
-On 13 October 2026, `cargo check --offline --tests` and the two normal unit tests passed. The generated WebM passed `gst-discoverer`, and `cargo test --offline decodes_and_controls_local_audio_video -- --ignored` passed against it. A three-second hidden executable launch stayed alive and had a native window handle. These checks do not establish that the visible UI renders correctly or that audio is audible. Run the remaining checks only in a coordinated build window after confirming that C: remains above 20 GiB free.
+On 13 October 2026, before the MediaStrike rename, `cargo check --offline --tests` and the two normal unit tests passed. The generated WebM passed `gst-discoverer`, and `cargo test --offline decodes_and_controls_local_audio_video -- --ignored` passed against it. A three-second hidden executable launch stayed alive and had a native window handle. On 15 October, the [hosted Windows build](https://github.com/Gerbzz/MediaStrike/actions/runs/38717559048) passed the two normal tests and a synthetic-media playback test, and a [native renderer capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) verified one decoded frame in the renamed UI. Audible output and completed transport interactions remain unverified. Run the remaining checks only in a coordinated build window after confirming that C: remains above 20 GiB free.
 
 ## 1. Create a tiny local audio/video sample
 
-From the PlayStrike folder in PowerShell:
+From the MediaStrike repository folder in PowerShell:
 
 ```powershell
 $gst = 'C:\Program Files\gstreamer\1.0\msvc_x86_64'
@@ -24,9 +24,9 @@ $sampleGst = $sample.Replace('\', '/')
 
 The installed SDK has been checked for these elements. The generated 35 KB sample in `verification/playstrike-sample.webm` is a seekable, two-second VP8/Opus file. Keep it local; it contains only a test pattern and a quiet tone.
 
-## 2. Build and exercise PlayStrike
+## 2. Build and exercise MediaStrike
 
-From the PlayStrike folder, choose a target directory with sufficient free space:
+From the MediaStrike repository folder, choose a target directory with sufficient free space:
 
 ```powershell
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
@@ -37,6 +37,6 @@ cargo test --offline decodes_and_controls_local_audio_video -- --ignored
 & "$env:CARGO_TARGET_DIR\debug\playstrike.exe" $sample
 ```
 
-Check that a video frame appears in the PlayStrike window and the quiet audio plays. Pause and resume, drag the seek bar near the middle, adjust volume, and drop the same file into the window. Then open a missing file to confirm a visible error without losing the current playable file. Record whether end-of-stream can be replayed. Observe CPU/memory only after the player is running; source size or `cargo check` is not performance evidence.
+Check that a video frame appears in the MediaStrike window and the quiet audio plays. Confirm the lyrebird logo and MediaStrike name appear on the initial view and in About. Pause and resume, drag the seek bar near the middle, adjust volume, and drop the same file into the window. Then open a missing file to confirm a visible error without losing the current playable file. Record whether end-of-stream can be replayed. Observe CPU/memory only after the player is running; source size or `cargo check` is not performance evidence.
 
-Capture the PlayStrike window through supported native UI tooling at `verification/playstrike-native.png` (or attach the capture to the review if saving is unavailable). The current delegated session has no native app surface exposed, so it has not captured or inspected that image.
+The [current app-rendered capture](assets/screenshots/mediastrike-draft-player-2026-10-15.png) was made with a synthetic AVI and inspected. Its [provenance](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) records the source, executable, fixture, and PNG hashes. Repeat a visible review for the interactive and audible checks above.
