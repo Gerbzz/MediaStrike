@@ -225,7 +225,9 @@ fn tight_rgba(source: &[u8], width: usize, height: usize, stride: usize) -> Opti
 #[cfg(test)]
 mod tests {
     use super::{Player, tight_rgba};
+    use gstreamer as gst;
     use gstreamer::glib::prelude::ObjectExt;
+    use gstreamer::prelude::*;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -269,10 +271,26 @@ mod tests {
         assert!(player.duration().is_some_and(|duration| duration > 1.5));
         player.toggle().expect("pause");
         assert!(!player.playing);
+        let (result, state, _) = player.pipeline.state(Some(gst::ClockTime::from_seconds(3)));
+        assert!(result.is_ok(), "GStreamer should settle after pause");
+        assert_eq!(state, gst::State::Paused);
         player.seek(1.0).expect("seek");
+        let seek_deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < seek_deadline
+            && player.position().is_none_or(|position| position < 0.7)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            player.position().is_some_and(|position| position >= 0.7),
+            "the native seek position should move near one second"
+        );
         player.set_volume(0.5);
         assert_eq!(player.pipeline.property::<f64>("volume"), 0.5);
         player.toggle().expect("resume");
         assert!(player.playing);
+        let (result, state, _) = player.pipeline.state(Some(gst::ClockTime::from_seconds(3)));
+        assert!(result.is_ok(), "GStreamer should settle after resume");
+        assert_eq!(state, gst::State::Playing);
     }
 }

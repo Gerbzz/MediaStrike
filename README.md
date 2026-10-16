@@ -17,11 +17,17 @@
 
 ## Player preview
 
-### MediaStrike draft interface
+### MediaStrike queue layout draft
+
+![MediaStrike queue layout showing two synthetic local files and a decoded frame](assets/screenshots/mediastrike-queue-preview.png)
+
+This [native renderer capture](docs/QUEUE_CAPTURE_PROVENANCE.md) shows the current queue branch with two local files in its session queue. It verifies the visible layout and one decoded frame; hands-on transport and queue interaction still need review.
+
+### Earlier MediaStrike draft interface
 
 ![MediaStrike draft showing a decoded frame from a synthetic local AVI](assets/screenshots/mediastrike-draft-player-2026-10-15.png)
 
-This [app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame in the native Windows player. Transport interaction and audible output still need hands-on review.
+This [earlier app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) comes from the MediaStrike rename branch at commit `092da379`. It shows a decoded synthetic video frame before the queue layout.
 
 ### Historical PlayStrike interface
 
@@ -33,11 +39,15 @@ The [earlier PlayStrike capture](docs/SCREENSHOT_PROVENANCE.md) remains here for
 
 ### Open a local file your way
 
-Use the file picker, drag and drop, or a launch path. The player reports an error when a file cannot be opened. It does not bundle a media library, account, cloud service, or codec pack.
+Use the multi-file picker, drag and drop, or launch paths. The player reports an error when a file cannot be opened. It does not bundle an account, cloud service, or codec pack.
+
+### Keep a session queue
+
+Add more local files without interrupting playback, select a queued file, filter the queue by filename, and use previous/next and repeat controls. The queue holds up to 1,000 entries and lasts for this session only. Saved playlists, a scanned media library, and broader VLC features remain future work; see the [feature coverage map](docs/VLC_PARITY.md).
 
 ### Stay in control of playback
 
-Play and pause, seek with the bar or five-second steps, and adjust volume in the window. Keyboard shortcuts include **Space** for play/pause, **Left/Right** for seeking, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
+Play and pause, seek with the bar or five-second steps, and adjust volume in the window. Keyboard shortcuts include **Space** for play/pause, **Left/Right** for seeking, **Alt+Left/Right** for previous/next file, and **Ctrl+O** for the file picker. The seek bar commits its new position when released.
 
 ### Decode with the installed GStreamer runtime
 
@@ -55,7 +65,7 @@ $env:PKG_CONFIG_PATH = "$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig"
 $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 = $gst
 $env:GST_PLUGIN_SYSTEM_PATH = "$gst\lib\gstreamer-1.0"
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
-cargo run --locked -- path\to\media.mp4
+cargo run --locked -- path\to\first.mp4 path\to\second.mp4
 ```
 
 Omit the media path to choose or drop a file in the window. Add `--offline` to Cargo after dependencies are cached. Check disk headroom before building and follow [VERIFY.md](VERIFY.md) for the remaining native review.
@@ -64,7 +74,7 @@ The executable and Cargo package are still named `playstrike` so existing launch
 
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer. A hosted Windows build, two unit tests, and a GStreamer playback test with a small uncompressed AVI passed on the rename branch. The new screenshot verifies one decoded synthetic video frame in the MediaStrike draft; the historical screenshot records the earlier PlayStrike interface. Interactive transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer or VLC feature parity. A hosted Windows build, Rust unit tests, and a GStreamer playback test with a small uncompressed AVI passed. A native renderer capture shows two queued test files and a decoded frame. Interactive queue and transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
 The original [lyrebird artwork](assets/branding) is included in the start view and About panel; native app-icon integration remains pending. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
