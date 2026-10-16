@@ -1645,6 +1645,15 @@ mod tests {
 
         app.load_external_subtitle(malformed, ctx.clone())
             .expect("start malformed subtitle candidate");
+        // Clear already delivered PCM, then flush-seek the original pipeline.
+        // The next sink samples belong to output after the app began loading.
+        drain(&sink);
+        app.player
+            .as_ref()
+            .unwrap()
+            .seek(0.0)
+            .expect("flush original during candidate load");
+        drain(&sink);
         assert!(app.pending_subtitle_load.is_some());
         assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
         assert_eq!(
