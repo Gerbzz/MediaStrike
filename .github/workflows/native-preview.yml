@@ -74,6 +74,8 @@ jobs:
           @('1', '00:00:00,000 --> 00:00:05,500', 'Synthetic subtitle test', '') | Set-Content -LiteralPath $subtitle -Encoding ascii
           $env:PLAYSTRIKE_SUBTITLE_VIDEO = $subtitleVideo
           $env:PLAYSTRIKE_SUBTITLE_SAMPLE = $subtitle
+          cargo test --locked -j 2 focus_ -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw 'Focus transition drag test failed' }
           cargo test --locked -j 2 discovers_and_switches_external_subtitle_track -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'External subtitle track test failed' }
           $vtt = Join-Path $env:RUNNER_TEMP 'mediastrike-synthetic.vtt'

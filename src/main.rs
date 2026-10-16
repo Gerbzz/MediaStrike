@@ -510,8 +510,8 @@ impl MediaStrike {
     }
 }
 
-impl eframe::App for MediaStrike {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl MediaStrike {
+    fn update_ui(&mut self, ctx: &egui::Context) {
         self.refresh_player(ctx);
         if self.player.is_none() {
             self.focus_view = false;
@@ -990,6 +990,12 @@ impl eframe::App for MediaStrike {
     }
 }
 
+impl eframe::App for MediaStrike {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_ui(ctx);
+    }
+}
+
 fn file_label(path: &std::path::Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1265,6 +1271,122 @@ mod tests {
             shortcuts = player_shortcuts(ctx);
         });
         (rect, focused, shortcuts)
+    }
+
+    fn player_ui_frame(app: &mut MediaStrike, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1120.0, 720.0),
+            )),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| app.update_ui(ctx));
+    }
+
+    fn paused_video_app(ctx: &egui::Context) -> MediaStrike {
+        gstreamer::init().expect("GStreamer runtime");
+        let video = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("AVI"));
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![video], true, ctx.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app
+                .player
+                .as_ref()
+                .and_then(|player| player.duration())
+                .is_none()
+        {
+            app.refresh_player(ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let player = app.player.as_mut().expect("opened synthetic media");
+        assert!(
+            player.duration().is_some(),
+            "synthetic media needs a seek range"
+        );
+        if player.playing {
+            player.toggle().expect("pause synthetic media");
+        }
+        app
+    }
+
+    fn pointer_button(position: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    #[ignore = "requires generated local video and GStreamer"]
+    fn focus_shortcut_cancels_seek_drag_in_both_directions() {
+        for focused in [false, true] {
+            let ctx = egui::Context::default();
+            let mut app = paused_video_app(&ctx);
+            app.focus_view = focused;
+            player_ui_frame(&mut app, &ctx, vec![]);
+            let start = if focused {
+                egui::pos2(200.0, 704.0)
+            } else {
+                egui::pos2(40.0, 663.0)
+            };
+            let end = start + egui::vec2(24.0, 0.0);
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(start),
+                    pointer_button(start, true),
+                ],
+            );
+            player_ui_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(end)]);
+            assert!(app.seek_preview.is_some(), "seek drag must be active");
+
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![shortcut_key(egui::Key::F11, egui::Modifiers::NONE)],
+            );
+            assert_eq!(app.focus_view, !focused, "F11 must change the view");
+            assert_eq!(app.seek_preview, None, "old seek drag must be canceled");
+            player_ui_frame(&mut app, &ctx, vec![pointer_button(end, false)]);
+            assert_eq!(app.seek_preview, None, "release must not revive old seek");
+            assert!(app.show_queue, "focus change must retain queue visibility");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires generated local video and GStreamer"]
+    fn focus_buttons_cancel_pending_seek_in_both_directions() {
+        for focused in [false, true] {
+            let ctx = egui::Context::default();
+            let mut app = paused_video_app(&ctx);
+            app.focus_view = focused;
+            player_ui_frame(&mut app, &ctx, vec![]);
+            app.seek_preview = Some(2.0);
+            let button = if focused {
+                egui::pos2(1065.0, 704.0)
+            } else {
+                egui::pos2(1033.0, 18.0)
+            };
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(button),
+                    pointer_button(button, true),
+                    pointer_button(button, false),
+                ],
+            );
+            assert_eq!(app.focus_view, !focused, "button must change the view");
+            assert_eq!(app.seek_preview, None, "button must cancel old seek");
+            assert!(app.show_queue, "focus change must retain queue visibility");
+        }
     }
 
     #[test]
