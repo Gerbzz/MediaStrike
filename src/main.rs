@@ -1486,15 +1486,10 @@ mod tests {
 
         fn click(app: &mut MediaStrike, ctx: &egui::Context, rect: egui::Rect) {
             let position = rect.center();
-            player_ui_frame(
-                app,
-                ctx,
-                vec![
-                    egui::Event::PointerMoved(position),
-                    pointer_button(position, true),
-                    pointer_button(position, false),
-                ],
-            );
+            eprintln!("egui pointer target: rect={rect:?} center={position:?}");
+            player_ui_frame(app, ctx, vec![egui::Event::PointerMoved(position)]);
+            player_ui_frame(app, ctx, vec![pointer_button(position, true)]);
+            player_ui_frame(app, ctx, vec![pointer_button(position, false)]);
         }
 
         player_ui_frame(&mut app, &ctx, vec![]);
