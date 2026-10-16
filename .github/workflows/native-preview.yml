@@ -100,8 +100,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Mute startup, pause, and replay output-sample test failed' }
           cargo test --locked -j 2 muted_pcm_survives_app_subtitle_failure -- --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'App subtitle failure mute output-sample test failed' }
-          cargo test --locked -j 2 mute_and_speed_buttons_accept_egui_pointer_events -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'Egui pointer control activation test failed' }
           cargo test --locked -j 2 rejected_initial_rate_falls_back_and_keeps_playback -- --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Rejected rate fallback test failed' }
           $audioOnly = Join-Path $env:RUNNER_TEMP 'mediastrike-audio-only.wav'
@@ -124,6 +122,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'A/V timestamp alignment test failed' }
           cargo test --locked -j 2 rate_during_malformed_subtitle_recovery -- --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Rate change during malformed subtitle recovery test failed' }
+          cargo test --locked -j 2 mute_and_speed_buttons_accept_egui_pointer_events -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Egui pointer control activation test failed' }
           # Best-effort native renderer probe. Hosted runners may not expose a desktop.
           New-Item -ItemType Directory -Force artifact | Out-Null
           "source=$env:GITHUB_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
@@ -148,6 +148,7 @@ jobs:
               "$view=unavailable error=$($_.Exception.GetType().Name)" | Add-Content artifact/capture-probe.txt -Encoding ascii
             }
           }
+          Get-Content artifact/capture-probe.txt
           cargo test --locked -j 2 subtitle_file_choice_keeps_playback_on_cancel_and_async_failure -- --ignored
           if ($LASTEXITCODE -ne 0) { throw 'Subtitle file state and async failure test failed' }
           $embeddedA = Join-Path $env:RUNNER_TEMP 'mediastrike-embedded-a.srt'

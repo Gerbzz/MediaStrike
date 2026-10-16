@@ -2059,6 +2059,23 @@ mod tests {
         app.previous_track(ctx.clone());
         assert_eq!(app.player.as_ref().unwrap().path, video);
         assert!(app.player.as_ref().unwrap().muted());
+        // Let the replacement after Previous finish preroll before opening
+        // another pipeline; the queue transition itself was checked above.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app.player.as_ref().is_some_and(|player| {
+                !player.prerolled() || player.duration().is_none()
+            })
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            app.player
+                .as_ref()
+                .is_some_and(|player| player.prerolled() && player.duration().is_some()),
+            "queue replacement did not preroll before subtitle load"
+        );
         app.load_external_subtitle(subtitle, ctx.clone()).expect("load SRT");
         assert!(app.pending_subtitle_load.as_ref().unwrap().player.muted());
         app.toggle_mute();
