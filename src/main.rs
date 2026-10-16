@@ -1330,22 +1330,10 @@ mod tests {
             let mut app = paused_video_app(&ctx);
             app.focus_view = focused;
             player_ui_frame(&mut app, &ctx, vec![]);
-            let start = if focused {
-                egui::pos2(200.0, 704.0)
-            } else {
-                egui::pos2(40.0, 663.0)
-            };
-            let end = start + egui::vec2(24.0, 0.0);
-            player_ui_frame(
-                &mut app,
-                &ctx,
-                vec![
-                    egui::Event::PointerMoved(start),
-                    pointer_button(start, true),
-                ],
-            );
-            player_ui_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(end)]);
-            assert!(app.seek_preview.is_some(), "seek drag must be active");
+            // The slider sets this preview while dragged. Seed that exact app
+            // state without depending on renderer-specific widget coordinates.
+            app.seek_preview = Some(2.0);
+            let position_before = app.player.as_ref().unwrap().position().unwrap_or(0.0);
 
             player_ui_frame(
                 &mut app,
@@ -1354,8 +1342,17 @@ mod tests {
             );
             assert_eq!(app.focus_view, !focused, "F11 must change the view");
             assert_eq!(app.seek_preview, None, "old seek drag must be canceled");
-            player_ui_frame(&mut app, &ctx, vec![pointer_button(end, false)]);
+            player_ui_frame(
+                &mut app,
+                &ctx,
+                vec![pointer_button(egui::pos2(80.0, 663.0), false)],
+            );
             assert_eq!(app.seek_preview, None, "release must not revive old seek");
+            let position_after = app.player.as_ref().unwrap().position().unwrap_or(0.0);
+            assert!(
+                (position_after - position_before).abs() < 0.5,
+                "canceling a seek must not move playback"
+            );
             assert!(app.show_queue, "focus change must retain queue visibility");
         }
     }
