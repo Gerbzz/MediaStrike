@@ -730,9 +730,16 @@ mod tests {
 
         // The same item's EOS path pauses and seeks back to zero.
         player.seek(7.5).expect("seek near end for same-item replay");
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(12);
         let mut reached_eos = false;
         while Instant::now() < deadline {
+            if let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
+                let bytes = sample_bytes(&sample);
+                assert!(
+                    bytes.iter().all(|byte| *byte == 0),
+                    "nonzero PCM reached sink before same-item replay"
+                );
+            }
             if let Some(event) = player.poll_event() {
                 event.expect("same-item playback");
                 if !player.playing {
@@ -740,9 +747,14 @@ mod tests {
                     break;
                 }
             }
-            std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(reached_eos, "synthetic item did not reach EOS");
+        assert!(
+            reached_eos,
+            "synthetic item did not reach EOS: position={:?}, duration={:?}, playing={}",
+            player.position(),
+            player.duration(),
+            player.playing
+        );
         drain(&sink);
         player.toggle().expect("replay same item");
         assert_silent_samples(&sink, &mut player, "same-item replay");
