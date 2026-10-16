@@ -1492,21 +1492,38 @@ mod tests {
             player_ui_frame(app, ctx, vec![pointer_button(position, false)]);
         }
 
-        player_ui_frame(&mut app, &ctx, vec![]);
-        assert!(
-            app.player.is_some(),
-            "player lost before UI click: status={} error={:?}",
-            app.status,
-            app.error
-        );
-        let mute = app.ui_mute_rect.expect("normal Mute button rendered");
+        fn visible_button(app: &mut MediaStrike, ctx: &egui::Context, speed: bool) -> egui::Rect {
+            let mut last = None;
+            for _ in 0..5 {
+                player_ui_frame(app, ctx, vec![]);
+                assert!(
+                    app.player.is_some(),
+                    "player lost before UI click: status={} error={:?}",
+                    app.status,
+                    app.error
+                );
+                let rect = if speed { app.ui_speed_rect } else { app.ui_mute_rect };
+                if let Some(rect) = rect {
+                    last = Some(rect);
+                    if rect.min.x >= 0.0
+                        && rect.min.y >= 0.0
+                        && rect.max.x <= 1120.0
+                        && rect.max.y <= 720.0
+                    {
+                        return rect;
+                    }
+                }
+            }
+            panic!("button never settled inside viewport: {last:?}");
+        }
+
+        let mute = visible_button(&mut app, &ctx, false);
         click(&mut app, &ctx, mute);
         assert!(app.muted && app.player.as_ref().unwrap().muted());
         eprintln!("normal Mute click: muted={} speed={}", app.muted, app.speed);
 
         for expected in [1.5, 2.0, 0.5, 1.0] {
-            player_ui_frame(&mut app, &ctx, vec![]);
-            let speed = app.ui_speed_rect.expect("normal Speed button rendered");
+            let speed = visible_button(&mut app, &ctx, true);
             click(&mut app, &ctx, speed);
             assert_eq!(app.speed, expected, "Speed click must cycle preset");
             wait_for_speed(&mut app, &ctx, expected);
@@ -1515,12 +1532,10 @@ mod tests {
         }
 
         app.set_focus_view(true, &ctx);
-        player_ui_frame(&mut app, &ctx, vec![]);
-        let unmute = app.ui_mute_rect.expect("focus Unmute button rendered");
+        let unmute = visible_button(&mut app, &ctx, false);
         click(&mut app, &ctx, unmute);
         assert!(!app.muted && !app.player.as_ref().unwrap().muted());
-        player_ui_frame(&mut app, &ctx, vec![]);
-        let speed = app.ui_speed_rect.expect("focus Speed button rendered");
+        let speed = visible_button(&mut app, &ctx, true);
         click(&mut app, &ctx, speed);
         assert_eq!(app.speed, 1.5);
         wait_for_speed(&mut app, &ctx, 1.5);
