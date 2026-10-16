@@ -653,7 +653,7 @@ impl MediaStrike {
                             if let Some(duration) = duration {
                                 let mut value =
                                     self.seek_preview.unwrap_or(position).clamp(0.0, duration);
-                                let width = (ui.available_width() - 225.0).max(100.0);
+                                let width = (ui.available_width() - 160.0).max(100.0);
                                 let response = ui
                                     .scope(|ui| {
                                         ui.spacing_mut().slider_width = width;
