@@ -11,6 +11,10 @@ pub struct Frame {
     pub width: usize,
     pub height: usize,
     pub rgba: Vec<u8>,
+    #[cfg(test)]
+    pub pts_ns: Option<u64>,
+    #[cfg(test)]
+    pub published_at: std::time::Instant,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +35,10 @@ pub struct Player {
     pub rate: f64,
     pending_rate: Option<f64>,
     rate_warning: Option<String>,
+    #[cfg(test)]
+    reject_rate_seek: bool,
+    #[cfg(test)]
+    last_rate_seek_used_pipeline: std::cell::Cell<bool>,
     subtitle_tracks: Vec<SubtitleTrack>,
     selected_non_text: Vec<String>,
     selected_subtitle: Option<String>,
@@ -181,6 +189,10 @@ impl Player {
             rate,
             pending_rate: (rate != 1.0).then_some(rate),
             rate_warning: None,
+            #[cfg(test)]
+            reject_rate_seek: false,
+            #[cfg(test)]
+            last_rate_seek_used_pipeline: std::cell::Cell::new(false),
             subtitle_tracks: Vec::new(),
             selected_non_text: Vec::new(),
             selected_subtitle: None,
@@ -294,6 +306,13 @@ impl Player {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err("Seek position is invalid".to_owned());
         }
+        #[cfg(test)]
+        {
+            self.last_rate_seek_used_pipeline.set(false);
+            if self.reject_rate_seek && rate != 1.0 {
+                return Err("Synthetic rate seek rejection".to_owned());
+            }
+        }
         let position = gst::ClockTime::from_nseconds((seconds * 1_000_000_000.0) as u64);
         let event = gst::event::Seek::new(
             rate,
@@ -308,6 +327,8 @@ impl Player {
         }
         // Audio-only media have no active video sink. In that case the
         // pipeline has only one playback sink to receive the rate seek.
+        #[cfg(test)]
+        self.last_rate_seek_used_pipeline.set(true);
         self.pipeline
             .seek(
                 rate,
@@ -551,6 +572,10 @@ fn publish_frame(
             width,
             height,
             rgba,
+            #[cfg(test)]
+            pts_ns: buffer.pts().map(|pts| pts.nseconds()),
+            #[cfg(test)]
+            published_at: std::time::Instant::now(),
         });
         ctx.request_repaint();
     }
@@ -716,6 +741,215 @@ mod tests {
             .expect("restore first track");
         wait_for_selected_track(&mut player, &first);
         assert!(text_output_enabled(&player));
+    }
+
+    #[test]
+    #[ignore = "requires generated local video via PLAYSTRIKE_SUBTITLE_VIDEO"]
+    fn rejected_initial_rate_falls_back_and_keeps_playback() {
+        gst::init().expect("GStreamer runtime");
+        let media = std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("video fixture");
+        let mut player = Player::open_with_settings(
+            Path::new(&media),
+            None,
+            eframe::egui::Context::default(),
+            0.8,
+            false,
+            1.5,
+        )
+        .expect("open at selected rate");
+        player.reject_rate_seek = true;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && player.pending_rate.is_some() {
+            if let Some(event) = player.poll_event() {
+                event.expect("preroll with rejected rate");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(player.pending_rate.is_none(), "rate setup did not settle");
+        assert_eq!(player.rate, 1.0);
+        assert!(player.playing, "rejected rate must keep playback active");
+        assert!(
+            player.take_rate_warning().is_some_and(|warning| warning.contains("continues at 1×")),
+            "rejected rate must produce a visible fallback warning"
+        );
+        assert!(player.set_rate(2.0).is_err(), "explicit rejected rate must return an error");
+        assert_eq!(player.rate, 1.0, "failed change must retain the applied rate");
+    }
+
+    #[test]
+    #[ignore = "requires generated audio-only WAV via PLAYSTRIKE_AUDIO_ONLY"]
+    fn audio_only_rate_uses_pipeline_fallback() {
+        use gstreamer_app as gst_app;
+
+        gst::init().expect("GStreamer runtime");
+        let media = std::env::var_os("PLAYSTRIKE_AUDIO_ONLY").expect("audio-only fixture");
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("rate", 16000i32)
+            .field("channels", 1i32)
+            .build();
+        let sink = gst_app::AppSink::builder()
+            .caps(&caps)
+            .sync(true)
+            .max_buffers(2)
+            .drop(true)
+            .build();
+        let mut player = Player::open_with_test_audio_sink(
+            Path::new(&media),
+            None,
+            eframe::egui::Context::default(),
+            0.8,
+            false,
+            1.5,
+            &sink,
+        )
+        .expect("open audio-only media");
+        let rate_at_sink = || {
+            let mut query = gst::query::Segment::new(gst::Format::Time);
+            sink.query(&mut query).then(|| query.result().0)
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && (player.pending_rate.is_some()
+                || rate_at_sink().is_none_or(|rate| (rate - 1.5).abs() > 0.01))
+        {
+            if let Some(event) = player.poll_event() {
+                event.expect("audio-only rate setup");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(player.rate, 1.5);
+        assert!(player.take_rate_warning().is_none());
+        assert!(player.last_rate_seek_used_pipeline.get(), "audio-only seek must use pipeline");
+        assert_eq!(rate_at_sink(), Some(1.5));
+
+        player.set_rate(2.0).expect("audio-only rate change");
+        player.seek(0.5).expect("audio-only seek at selected rate");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && rate_at_sink() != Some(2.0) {
+            player.poll_event().transpose().expect("audio-only playback");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(player.last_rate_seek_used_pipeline.get());
+        assert_eq!(rate_at_sink(), Some(2.0));
+    }
+
+    #[test]
+    #[ignore = "requires generated synchronized audio/video Matroska via PLAYSTRIKE_AV_TIMING_VIDEO"]
+    fn audio_video_timestamps_align_at_supported_rates() {
+        use gstreamer_app as gst_app;
+        use std::sync::{Arc, Mutex};
+
+        gst::init().expect("GStreamer runtime");
+        let media = std::env::var_os("PLAYSTRIKE_AV_TIMING_VIDEO").expect("A/V fixture");
+        let audio_stamps = Arc::new(Mutex::new(Vec::<(Instant, u64)>::new()));
+        let callback_stamps = Arc::clone(&audio_stamps);
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("rate", 16000i32)
+            .field("channels", 1i32)
+            .build();
+        let sink = gst_app::AppSink::builder()
+            .caps(&caps)
+            .sync(true)
+            .max_buffers(2)
+            .drop(true)
+            .build();
+        sink.set_callbacks(
+            gst_app::AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                    if let Some(pts) = sample.buffer().and_then(|buffer| buffer.pts()) {
+                        callback_stamps
+                            .lock()
+                            .unwrap()
+                            .push((Instant::now(), pts.nseconds()));
+                    }
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build(),
+        );
+        let mut player = Player::open_with_test_audio_sink(
+            Path::new(&media),
+            None,
+            eframe::egui::Context::default(),
+            0.8,
+            false,
+            1.0,
+            &sink,
+        )
+        .expect("open synchronized A/V fixture");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && (player.position().is_none() || player.duration().is_none())
+        {
+            player.poll_event().transpose().expect("A/V preroll");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(player.position().is_some());
+
+        for rate in [1.0, 0.5, 1.5, 2.0] {
+            player.set_rate(rate).expect("select supported rate");
+            player.seek(0.0).expect("restart A/V fixture");
+            audio_stamps.lock().unwrap().clear();
+            let _ = player.take_frame();
+            let after_seek = Instant::now();
+            let mut video_stamps = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline && video_stamps.len() < 6 {
+                if let Some(event) = player.poll_event() {
+                    event.expect("A/V timing playback");
+                }
+                if let Some(frame) = player.take_frame() {
+                    if frame.published_at >= after_seek {
+                        if let Some(pts) = frame.pts_ns {
+                            video_stamps.push((frame.published_at, pts));
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let audio = audio_stamps.lock().unwrap().clone();
+            let mut audio_query = gst::query::Segment::new(gst::Format::Time);
+            assert!(sink.query(&mut audio_query), "audio segment query at {rate}×");
+            let audio_rate = audio_query.result().0;
+            let video_rate = player.effective_rate().expect("video segment rate");
+            assert!((audio_rate - rate).abs() < 0.01, "audio rate={audio_rate} at {rate}×");
+            assert!((video_rate - rate).abs() < 0.01, "video rate={video_rate} at {rate}×");
+            assert!(video_stamps.len() >= 4, "too few video timestamps at {rate}×");
+            assert!(audio.len() >= 4, "too few audio timestamps at {rate}×");
+
+            let mut paired = 0;
+            let mut worst_pts_skew_ms = 0;
+            for (video_at, video_pts) in &video_stamps {
+                let Some((audio_at, audio_pts)) = audio.iter().min_by_key(|(audio_at, _)| {
+                    if *audio_at >= *video_at {
+                        audio_at.duration_since(*video_at)
+                    } else {
+                        video_at.duration_since(*audio_at)
+                    }
+                }) else {
+                    continue;
+                };
+                let wall_gap = if *audio_at >= *video_at {
+                    audio_at.duration_since(*video_at)
+                } else {
+                    video_at.duration_since(*audio_at)
+                };
+                if wall_gap > Duration::from_millis(120) {
+                    continue;
+                }
+                paired += 1;
+                worst_pts_skew_ms = worst_pts_skew_ms.max(video_pts.abs_diff(*audio_pts) / 1_000_000);
+            }
+            eprintln!(
+                "A/V rate={rate:.1} audio_samples={} video_frames={} paired={paired} worst_pts_skew_ms={worst_pts_skew_ms}",
+                audio.len(),
+                video_stamps.len()
+            );
+            assert!(paired >= 3, "too few close A/V timestamp pairs at {rate}×");
+            assert!(worst_pts_skew_ms <= 250, "A/V timestamps drifted at {rate}×");
+        }
     }
 
     #[test]

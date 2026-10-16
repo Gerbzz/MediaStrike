@@ -102,6 +102,10 @@ struct MediaStrike {
     gst_ready: bool,
     capture: Option<CaptureOnce>,
     pending_subtitle_load: Option<PendingSubtitleLoad>,
+    #[cfg(test)]
+    ui_mute_rect: Option<egui::Rect>,
+    #[cfg(test)]
+    ui_speed_rect: Option<egui::Rect>,
 }
 
 impl MediaStrike {
@@ -144,6 +148,10 @@ impl MediaStrike {
             gst_ready,
             capture,
             pending_subtitle_load: None,
+            #[cfg(test)]
+            ui_mute_rect: None,
+            #[cfg(test)]
+            ui_speed_rect: None,
         };
         if app.gst_ready && !media_paths.is_empty() {
             app.enqueue_media(media_paths, true, cc.egui_ctx.clone());
@@ -588,6 +596,11 @@ impl MediaStrike {
         if self.player.is_none() {
             self.set_focus_view(false, ctx);
         }
+        #[cfg(test)]
+        {
+            self.ui_mute_rect = None;
+            self.ui_speed_rect = None;
+        }
         let dropped: Vec<_> = ctx.input(|input| {
             input
                 .raw
@@ -687,10 +700,15 @@ impl MediaStrike {
                                 }
                             }
                             next_clicked = ui.button("Next").clicked();
-                            mute_clicked = ui
-                                .button(if self.muted { "Unmute" } else { "Mute" })
-                                .clicked();
-                            speed_clicked = ui.button(format!("Speed {:.1}×", self.speed)).clicked();
+                            let mute_button = ui.button(if self.muted { "Unmute" } else { "Mute" });
+                            let speed_button = ui.button(format!("Speed {:.1}×", self.speed));
+                            #[cfg(test)]
+                            {
+                                self.ui_mute_rect = Some(mute_button.rect);
+                                self.ui_speed_rect = Some(speed_button.rect);
+                            }
+                            mute_clicked = mute_button.clicked();
+                            speed_clicked = speed_button.clicked();
                             let position = player.position().unwrap_or(0.0);
                             let duration = player.duration().filter(|time| *time > 0.0);
                             if let Some(duration) = duration {
@@ -812,10 +830,15 @@ impl MediaStrike {
                                 }
                             }
                             ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
-                            mute_clicked = ui
-                                .button(if self.muted { "Unmute" } else { "Mute" })
-                                .clicked();
-                            speed_clicked = ui.button(format!("Speed {:.1}×", self.speed)).clicked();
+                            let mute_button = ui.button(if self.muted { "Unmute" } else { "Mute" });
+                            let speed_button = ui.button(format!("Speed {:.1}×", self.speed));
+                            #[cfg(test)]
+                            {
+                                self.ui_mute_rect = Some(mute_button.rect);
+                                self.ui_speed_rect = Some(speed_button.rect);
+                            }
+                            mute_clicked = mute_button.clicked();
+                            speed_clicked = speed_button.clicked();
                             ui.separator();
                             let subtitle_tracks = player.subtitle_tracks().to_vec();
                             let active_subtitle = player.selected_subtitle().map(str::to_owned);
@@ -1268,6 +1291,8 @@ mod tests {
             gst_ready: true,
             capture: None,
             pending_subtitle_load: None,
+            ui_mute_rect: None,
+            ui_speed_rect: None,
         }
     }
 
@@ -1416,6 +1441,73 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    #[test]
+    #[ignore = "requires generated local audio/video via PLAYSTRIKE_MUTE_AUDIO_VIDEO"]
+    fn mute_and_speed_buttons_accept_egui_pointer_events() {
+        gstreamer::init().expect("GStreamer runtime");
+        let media = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_MUTE_AUDIO_VIDEO").expect("audio/video fixture"),
+        );
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![media], true, ctx.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app.player.as_ref().is_none_or(|player| {
+                player.duration().is_none() || player.position().is_none()
+            })
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.player.as_ref().unwrap().position().is_some());
+        app.toggle();
+        assert!(!app.player.as_ref().unwrap().playing);
+
+        fn click(app: &mut MediaStrike, ctx: &egui::Context, rect: egui::Rect) {
+            let position = rect.center();
+            player_ui_frame(
+                app,
+                ctx,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    pointer_button(position, true),
+                    pointer_button(position, false),
+                ],
+            );
+        }
+
+        player_ui_frame(&mut app, &ctx, vec![]);
+        let mute = app.ui_mute_rect.expect("normal Mute button rendered");
+        click(&mut app, &ctx, mute);
+        assert!(app.muted && app.player.as_ref().unwrap().muted());
+        eprintln!("normal Mute click: muted={} speed={}", app.muted, app.speed);
+
+        for expected in [1.5, 2.0, 0.5, 1.0] {
+            player_ui_frame(&mut app, &ctx, vec![]);
+            let speed = app.ui_speed_rect.expect("normal Speed button rendered");
+            click(&mut app, &ctx, speed);
+            assert_eq!(app.speed, expected, "Speed click must cycle preset");
+            wait_for_speed(&mut app, &ctx, expected);
+            assert!(app.player.as_ref().unwrap().muted());
+            eprintln!("normal Speed click: muted={} speed={}", app.muted, app.speed);
+        }
+
+        app.set_focus_view(true, &ctx);
+        player_ui_frame(&mut app, &ctx, vec![]);
+        let unmute = app.ui_mute_rect.expect("focus Unmute button rendered");
+        click(&mut app, &ctx, unmute);
+        assert!(!app.muted && !app.player.as_ref().unwrap().muted());
+        player_ui_frame(&mut app, &ctx, vec![]);
+        let speed = app.ui_speed_rect.expect("focus Speed button rendered");
+        click(&mut app, &ctx, speed);
+        assert_eq!(app.speed, 1.5);
+        wait_for_speed(&mut app, &ctx, 1.5);
+        assert!(app.focus_view);
+        assert!(!app.player.as_ref().unwrap().playing);
+        eprintln!("focus UI clicks: muted={} speed={}", app.muted, app.speed);
     }
 
     #[test]
@@ -1644,6 +1736,59 @@ mod tests {
         assert_eq!(super::next_speed(1.5), 2.0);
         assert_eq!(super::next_speed(2.0), 0.5);
         assert_eq!(super::next_speed(0.5), 1.0);
+    }
+
+    #[test]
+    #[ignore = "requires generated local video and malformed SRT via PLAYSTRIKE_SUBTITLE_VIDEO and PLAYSTRIKE_SUBTITLE_MALFORMED"]
+    fn rate_during_malformed_subtitle_recovery() {
+        gstreamer::init().expect("GStreamer runtime");
+        let media = PathBuf::from(std::env::var_os("PLAYSTRIKE_SUBTITLE_VIDEO").expect("video"));
+        let malformed = PathBuf::from(
+            std::env::var_os("PLAYSTRIKE_SUBTITLE_MALFORMED").expect("malformed subtitle"),
+        );
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.enqueue_media(vec![media.clone()], true, ctx.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && app.player.as_ref().is_none_or(|player| {
+                player.duration().is_none() || player.position().is_none()
+            })
+        {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.player.as_ref().unwrap().position().is_some());
+        app.toggle();
+        app.toggle_mute();
+        app.cycle_speed();
+        wait_for_speed(&mut app, &ctx, 1.5);
+
+        app.load_external_subtitle(malformed, ctx.clone())
+            .expect("start malformed subtitle candidate");
+        assert!(app.pending_subtitle_load.is_some());
+        app.cycle_speed();
+        assert_eq!(app.speed, 2.0);
+        assert!(app.pending_subtitle_load.is_some());
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline && app.pending_subtitle_load.is_some() {
+            app.refresh_player(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(app.pending_subtitle_load.is_none(), "candidate did not fail");
+        assert!(
+            app.error
+                .as_ref()
+                .is_some_and(|error| error.starts_with("Subtitle loading failed:")),
+            "expected failed subtitle recovery: {:?}",
+            app.error
+        );
+        wait_for_speed(&mut app, &ctx, 2.0);
+        let original = app.player.as_ref().expect("original player remains");
+        assert_eq!(original.path, media);
+        assert!(!original.playing);
+        assert!(app.muted && original.muted());
+        eprintln!("malformed subtitle recovery: speed={} muted={}", app.speed, app.muted);
     }
 
     #[test]
