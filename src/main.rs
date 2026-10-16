@@ -1634,4 +1634,15 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn focus_view_launch_keeps_the_media_list_intact() {
+        let args = ["first.avi", "--focus-view", "--capture", "focus.png"]
+            .into_iter()
+            .map(OsString::from);
+        let parsed = parse_launch_args(args).expect("valid focus-view capture launch");
+        assert_eq!(parsed.media_paths, [PathBuf::from("first.avi")]);
+        assert_eq!(parsed.capture_path, Some(PathBuf::from("focus.png")));
+        assert!(parse_launch_args([OsString::from("--focus-view")]).is_err());
+    }
 }
