@@ -1573,7 +1573,6 @@ mod tests {
     #[ignore = "requires generated PCM Matroska and malformed SRT via PLAYSTRIKE_MUTE_AUDIO_VIDEO and PLAYSTRIKE_SUBTITLE_MALFORMED"]
     fn muted_pcm_survives_app_subtitle_failure() {
         use gstreamer as gst;
-        use gstreamer::prelude::*;
         use gstreamer_app as gst_app;
 
         fn drain(sink: &gst_app::AppSink) {
@@ -1636,7 +1635,7 @@ mod tests {
         // Replace only the test player's sink; app subtitle selection and
         // failure handling below still run through the normal MediaStrike path.
         app.player = Some(
-            Player::open_with_test_audio_sink(&media, None, ctx.clone(), 0.8, true, &sink)
+            super::Player::open_with_test_audio_sink(&media, None, ctx.clone(), 0.8, true, &sink)
                 .expect("instrument original player"),
         );
         assert_eq!(app.player.as_ref().unwrap().volume, 0.8);
