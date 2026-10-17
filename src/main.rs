@@ -866,29 +866,59 @@ impl MediaStrike {
                         .color(MUTED_TEXT),
                     );
                     ui.add_space(8.0);
-                    ui.add(
+                    let search = ui.add(
                         egui::TextEdit::singleline(&mut self.queue_search)
                             .hint_text("Filter queue"),
                     );
+                    if search.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                        self.queue_search.clear();
+                    }
                     ui.separator();
                     let filter = self.queue_search.trim().to_lowercase();
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (index, path) in self.queue.items().iter().enumerate() {
-                            let label = file_label(path);
-                            if !filter.is_empty() && !label.to_lowercase().contains(&filter) {
-                                continue;
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.queue.current() == Some(index),
-                                    format!("{:02}  {label}", index + 1),
-                                )
-                                .clicked()
-                            {
-                                select_index = Some(index);
-                            }
+                    let matching = self
+                        .queue
+                        .items()
+                        .iter()
+                        .filter(|path| filter.is_empty() || file_label(path).to_lowercase().contains(&filter))
+                        .count();
+                    if !filter.is_empty() {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{matching} of {} files",
+                                self.queue.items().len()
+                            ))
+                            .color(MUTED_TEXT),
+                        );
+                    }
+                    if self.queue.items().is_empty() {
+                        ui.add_space(16.0);
+                        ui.label("The session queue is empty.");
+                        ui.label(egui::RichText::new("Use Add files to choose local media.").color(MUTED_TEXT));
+                    } else if matching == 0 {
+                        ui.add_space(16.0);
+                        ui.label("No files match this filter.");
+                        if ui.button("Clear filter").clicked() {
+                            self.queue_search.clear();
                         }
-                    });
+                    } else {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (index, path) in self.queue.items().iter().enumerate() {
+                                let label = file_label(path);
+                                if !filter.is_empty() && !label.to_lowercase().contains(&filter) {
+                                    continue;
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.queue.current() == Some(index),
+                                        format!("{:02}  {label}", index + 1),
+                                    )
+                                    .clicked()
+                                {
+                                    select_index = Some(index);
+                                }
+                            }
+                        });
+                    }
                 });
         }
         if let Some(index) = select_index {
