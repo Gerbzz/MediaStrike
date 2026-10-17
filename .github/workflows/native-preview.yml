@@ -2,7 +2,7 @@ name: MediaStrike native preview
 
 on:
   push:
-    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view]
+    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-queue-recovery]
 
 permissions:
   contents: read
@@ -67,7 +67,7 @@ jobs:
           $subtitleVideo = Join-Path $env:RUNNER_TEMP 'mediastrike-subtitle-video.avi'
           $subtitleVideoGst = $subtitleVideo.Replace('\', '/')
           & gst-launch-1.0.exe -q avimux name=mux ! filesink "location=$subtitleVideoGst" `
-            videotestsrc pattern=black num-buffers=6 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.
+            videotestsrc pattern=black num-buffers=10 ! 'video/x-raw,format=BGR,width=320,height=180,framerate=1/1' ! queue ! mux.
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $subtitleVideo)) { throw 'Subtitle test AVI generation failed' }
           if ((Get-Item $subtitleVideo).Length -gt 2MB) { throw 'Subtitle test AVI exceeds 2 MiB cap' }
           $subtitle = Join-Path $env:RUNNER_TEMP 'mediastrike-synthetic.srt'
