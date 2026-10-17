@@ -550,9 +550,6 @@ impl MediaStrike {
                 .show(ctx, |ui| {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if let Some(texture) = &self.brand_texture {
-                            ui.image((texture.id(), egui::vec2(24.0, 24.0)));
-                        }
                         ui.label(egui::RichText::new("MediaStrike").strong().size(17.0));
                         ui.separator();
                         if let Some(player) = &self.player {
