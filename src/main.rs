@@ -905,12 +905,13 @@ impl MediaStrike {
                         ui.label("No supported video or audio files in this folder.");
                     } else if !self.browser_items.is_empty() && matches.is_empty() {
                         ui.label("No files match this search.");
-                        if ui.button("Clear search").clicked() { self.browser_search.clear(); }
+                        if ui.button("Clear search").clicked() { self.browser_search.clear(); search.request_focus(); }
                     } else {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             for path in matches {
                                 let selected = self.player.as_ref().is_some_and(|player| player.path == path);
-                                if ui.selectable_label(selected, file_label(&path)).clicked() {
+                                let row = ui.selectable_label(selected, file_label(&path));
+                                if row.clicked() || (row.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))) {
                                     browse_play = Some(path);
                                 }
                             }
@@ -992,6 +993,7 @@ impl MediaStrike {
                         ui.label("No files match this filter.");
                         if ui.button("Clear filter").clicked() {
                             self.queue_search.clear();
+                            search.request_focus();
                         }
                     } else {
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1000,13 +1002,11 @@ impl MediaStrike {
                                 if !filter.is_empty() && !label.to_lowercase().contains(&filter) {
                                     continue;
                                 }
-                                if ui
-                                    .selectable_label(
-                                        self.queue.current() == Some(index),
-                                        format!("{:02}  {label}", index + 1),
-                                    )
-                                    .clicked()
-                                {
+                                let row = ui.selectable_label(
+                                    self.queue.current() == Some(index),
+                                    format!("{:02}  {label}", index + 1),
+                                );
+                                if row.clicked() || (row.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))) {
                                     select_index = Some(index);
                                 }
                             }
