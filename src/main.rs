@@ -89,6 +89,8 @@ struct MediaStrike {
     gst_ready: bool,
     capture: Option<CaptureOnce>,
     pending_subtitle_load: Option<PendingSubtitleLoad>,
+    #[cfg(test)]
+    queue_filter_rect: Option<egui::Rect>,
 }
 
 impl MediaStrike {
@@ -129,6 +131,8 @@ impl MediaStrike {
             gst_ready,
             capture,
             pending_subtitle_load: None,
+            #[cfg(test)]
+            queue_filter_rect: None,
         };
         if app.gst_ready && !media_paths.is_empty() {
             app.enqueue_media(media_paths, true, cc.egui_ctx.clone());
@@ -870,7 +874,13 @@ impl MediaStrike {
                         egui::TextEdit::singleline(&mut self.queue_search)
                             .hint_text("Filter queue"),
                     );
-                    if search.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                    #[cfg(test)]
+                    {
+                        self.queue_filter_rect = Some(search.rect);
+                    }
+                    if (search.has_focus() || search.lost_focus())
+                        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+                    {
                         self.queue_search.clear();
                     }
                     ui.separator();
@@ -1209,6 +1219,7 @@ mod tests {
             gst_ready: true,
             capture: None,
             pending_subtitle_load: None,
+            queue_filter_rect: None,
         }
     }
 
@@ -1421,6 +1432,33 @@ mod tests {
             assert_eq!(app.seek_preview, None, "button must cancel old seek");
             assert!(app.show_queue, "focus change must retain queue visibility");
         }
+    }
+
+    #[test]
+    fn focused_escape_clears_queue_filter_after_egui_releases_focus() {
+        let ctx = egui::Context::default();
+        let mut app = synthetic_app();
+        app.queue_search = "not-found".to_owned();
+        player_ui_frame(&mut app, &ctx, vec![]);
+
+        let filter_position = app.queue_filter_rect.expect("queue filter rect").center();
+        player_ui_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(filter_position),
+                pointer_button(filter_position, true),
+                pointer_button(filter_position, false),
+            ],
+        );
+        assert!(ctx.wants_keyboard_input(), "queue filter should own keyboard focus");
+
+        player_ui_frame(
+            &mut app,
+            &ctx,
+            vec![shortcut_key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(app.queue_search.is_empty(), "Escape must clear the focused filter");
     }
 
     #[test]
