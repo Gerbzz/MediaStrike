@@ -2,7 +2,7 @@ name: MediaStrike native preview
 
 on:
   push:
-    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view]
+    branches: [codex/mediastrike-rename, codex/mediastrike-queue-ui, codex/mediastrike-subtitles, codex/mediastrike-subtitles-verification, codex/mediastrike-focus-view, codex/mediastrike-queue-recovery]
 
 permissions:
   contents: read
