@@ -5,8 +5,8 @@ use eframe::egui;
 use player::Player;
 use queue::MediaQueue;
 use std::ffi::OsString;
-use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -78,6 +78,11 @@ struct MediaStrike {
     queue: MediaQueue,
     show_queue: bool,
     queue_search: String,
+    show_browser: bool,
+    browser_folder: Option<PathBuf>,
+    browser_items: Vec<PathBuf>,
+    browser_search: String,
+    browser_ascending: bool,
     focus_view: bool,
     texture: Option<egui::TextureHandle>,
     brand_texture: Option<egui::TextureHandle>,
@@ -120,6 +125,11 @@ impl MediaStrike {
             queue: MediaQueue::default(),
             show_queue: true,
             queue_search: String::new(),
+            show_browser: false,
+            browser_folder: None,
+            browser_items: Vec::new(),
+            browser_search: String::new(),
+            browser_ascending: true,
             focus_view: false,
             texture: None,
             brand_texture: load_brand_texture(&cc.egui_ctx),
@@ -162,6 +172,7 @@ impl MediaStrike {
         };
         let added = self.queue.items().len() - first;
         self.show_queue = true;
+        self.show_browser = false;
         self.error =
             (added < requested).then(|| "The session queue is full (1,000 files)".to_owned());
         if play_new || self.player.is_none() {
@@ -543,6 +554,7 @@ impl MediaStrike {
         }
 
         let mut pick_files = None;
+        let mut pick_folder = false;
 
         if !self.focus_view {
             egui::TopBottomPanel::top("identity")
@@ -580,6 +592,7 @@ impl MediaStrike {
                                 .clicked()
                             {
                                 self.show_queue = !self.show_queue;
+                                self.show_browser = false;
                             }
                             if ui
                                 .add_enabled(self.gst_ready, egui::Button::new("Open files"))
@@ -823,16 +836,26 @@ impl MediaStrike {
                     ui.label(egui::RichText::new("YOUR MEDIA").color(MUTED_TEXT).small());
                     ui.add_space(12.0);
                     if ui
-                        .selectable_label(!self.show_queue, "Now playing")
+                        .selectable_label(!self.show_queue && !self.show_browser, "Now playing")
                         .clicked()
                     {
                         self.show_queue = false;
+                        self.show_browser = false;
+                    }
+                    if ui
+                        .selectable_label(self.show_browser, "Browse folder")
+                        .clicked()
+                    {
+                        self.show_queue = false;
+                        self.show_browser = true;
+                        pick_folder = self.browser_folder.is_none();
                     }
                     if ui
                         .selectable_label(self.show_queue, "Session queue")
                         .clicked()
                     {
                         self.show_queue = true;
+                        self.show_browser = false;
                     }
                     ui.separator();
                     ui.label(
@@ -840,6 +863,69 @@ impl MediaStrike {
                             .color(MUTED_TEXT),
                     );
                 });
+        }
+
+        let mut browse_play = None;
+        if self.show_browser && !self.focus_view {
+            egui::SidePanel::left("browser")
+                .resizable(true)
+                .default_width(290.0)
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(22, 22, 22)))
+                .show(ctx, |ui| {
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.heading("Browse local media");
+                        if ui.button("Choose folder…").clicked() { pick_folder = true; }
+                    });
+                    if let Some(folder) = &self.browser_folder {
+                        ui.label(egui::RichText::new(folder.display().to_string()).color(MUTED_TEXT).small());
+                    } else {
+                        ui.label(egui::RichText::new("Choose a folder to see its video and audio files.").color(MUTED_TEXT));
+                    }
+                    ui.add_space(8.0);
+                    let search = ui.add(egui::TextEdit::singleline(&mut self.browser_search).hint_text("Search this folder"));
+                    if (search.has_focus() || search.lost_focus())
+                        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+                    {
+                        self.browser_search.clear();
+                    }
+                    let filter = self.browser_search.trim().to_lowercase();
+                    let mut matches: Vec<_> = self.browser_items.iter()
+                        .filter(|path| filter.is_empty() || file_label(path).to_lowercase().contains(&filter))
+                        .cloned().collect();
+                    if !self.browser_ascending { matches.reverse(); }
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{} of {} files", matches.len(), self.browser_items.len())).color(MUTED_TEXT));
+                        if ui.button(if self.browser_ascending { "Name A–Z" } else { "Name Z–A" }).clicked() {
+                            self.browser_ascending = !self.browser_ascending;
+                        }
+                    });
+                    ui.separator();
+                    if self.browser_folder.is_some() && self.browser_items.is_empty() {
+                        ui.label("No supported video or audio files in this folder.");
+                    } else if !self.browser_items.is_empty() && matches.is_empty() {
+                        ui.label("No files match this search.");
+                        if ui.button("Clear search").clicked() { self.browser_search.clear(); }
+                    } else {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for path in matches {
+                                let selected = self.player.as_ref().is_some_and(|player| player.path == path);
+                                if ui.selectable_label(selected, file_label(&path)).clicked() {
+                                    browse_play = Some(path);
+                                }
+                            }
+                        });
+                    }
+                });
+        }
+        if let Some(path) = browse_play {
+            if let Some(index) = self.queue.items().iter().position(|item| item == &path) {
+                self.open_index(index, ctx.clone());
+            } else {
+                self.enqueue_media(vec![path], true, ctx.clone());
+            }
+            self.show_browser = true;
+            self.show_queue = false;
         }
 
         let mut select_index = None;
@@ -1024,6 +1110,21 @@ impl MediaStrike {
                 self.enqueue_media(paths, play_new, ctx.clone());
             }
         }
+        if pick_folder {
+            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                match scan_media_folder(&folder) {
+                    Ok(items) => {
+                        self.browser_items = items;
+                        self.browser_folder = Some(folder);
+                        self.browser_search.clear();
+                        self.error = None;
+                        self.show_browser = true;
+                        self.show_queue = false;
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
+        }
         if choose_external_subtitle {
             let choice = rfd::FileDialog::new()
                 .add_filter("Subtitle files", &["srt", "vtt"])
@@ -1038,6 +1139,36 @@ impl eframe::App for MediaStrike {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_ui(ctx);
     }
+}
+
+fn scan_media_folder(folder: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = fs::read_dir(folder).map_err(|error| format!("Cannot browse folder: {error}"))?;
+    let mut files = Vec::new();
+    for (seen, entry) in entries.enumerate() {
+        if seen >= 10_000 { return Err("Folder has too many entries to browse safely".to_owned()); }
+        let entry = entry.map_err(|error| format!("Cannot read folder entry: {error}"))?;
+        if !entry.file_type().map_err(|error| format!("Cannot inspect folder entry: {error}"))?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if !is_media_path(&path) { continue; }
+        files.push(path);
+        if files.len() > queue::MAX_QUEUE_ITEMS {
+            return Err("Folder has more than 1,000 supported media files".to_owned());
+        }
+    }
+    files.sort_by_key(|path| file_label(path).to_lowercase());
+    Ok(files)
+}
+
+fn is_media_path(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+        matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "mp4" | "m4v" | "mkv" | "avi" | "mov" | "webm" | "wmv" | "mpg" | "mpeg"
+                | "mp3" | "m4a" | "aac" | "wav" | "flac" | "ogg" | "opus" | "aiff"
+        )
+    })
 }
 
 fn file_label(path: &std::path::Path) -> String {
@@ -1193,10 +1324,10 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{MediaStrike, PlayerShortcuts, format_time, parse_launch_args, player_shortcuts};
+    use super::{MediaStrike, PlayerShortcuts, format_time, parse_launch_args, player_shortcuts, scan_media_folder, is_media_path};
     use eframe::egui;
     use std::ffi::OsString;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
     fn synthetic_app() -> MediaStrike {
@@ -1205,6 +1336,11 @@ mod tests {
             queue: Default::default(),
             show_queue: true,
             queue_search: String::new(),
+            show_browser: false,
+            browser_folder: None,
+            browser_items: Vec::new(),
+            browser_search: String::new(),
+            browser_ascending: true,
             focus_view: false,
             texture: None,
             brand_texture: None,
@@ -1218,6 +1354,24 @@ mod tests {
             pending_subtitle_load: None,
             queue_filter_rect: None,
         }
+    }
+
+    #[test]
+    fn folder_browser_lists_only_regular_supported_media_in_name_order() {
+        let folder = std::env::temp_dir().join(format!(
+            "mediastrike-browser-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("b.MP4"), b"synthetic").unwrap();
+        std::fs::write(folder.join("a.flac"), b"synthetic").unwrap();
+        std::fs::write(folder.join("notes.txt"), b"synthetic").unwrap();
+        std::fs::create_dir(folder.join("nested.mkv")).unwrap();
+        let files = scan_media_folder(&folder).unwrap();
+        assert_eq!(files.iter().map(|path| path.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>(), vec!["a.flac", "b.MP4"]);
+        assert!(is_media_path(Path::new("voice.OPUS")));
+        assert!(!is_media_path(Path::new("script.exe")));
     }
 
     fn wait_for_position_at_least(app: &mut MediaStrike, ctx: &egui::Context, minimum: f64) -> f64 {
