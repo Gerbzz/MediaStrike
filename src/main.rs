@@ -1969,9 +1969,11 @@ mod tests {
     #[test]
     #[ignore = "requires generated AVI, SRT, and two-track Matroska fixture environment variables"]
     fn repeat_one_keeps_external_and_embedded_subtitle_choices() {
-        fn replay_from_near_end(app: &mut MediaStrike, ctx: &egui::Context, seconds: f64) {
+        fn replay_from_near_end(app: &mut MediaStrike, ctx: &egui::Context) {
             app.status.clear();
-            app.player.as_ref().unwrap().seek(seconds).unwrap();
+            let duration = app.player.as_ref().unwrap().duration().expect("synthetic video duration");
+            assert!(duration > 1.0, "repeat fixture needs a seekable duration");
+            app.player.as_ref().unwrap().seek(duration - 0.9).unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline && !app.status.starts_with("Replaying ") {
                 app.refresh_player(ctx);
@@ -2009,7 +2011,7 @@ mod tests {
         );
         external_app.queue.cycle_repeat();
         external_app.queue.cycle_repeat();
-        replay_from_near_end(&mut external_app, &ctx, 5.1);
+        replay_from_near_end(&mut external_app, &ctx);
         assert_eq!(
             external_app.player.as_ref().unwrap().external_subtitle(),
             Some(srt.canonicalize().unwrap().as_path()),
@@ -2052,7 +2054,7 @@ mod tests {
         );
         embedded_app.queue.cycle_repeat();
         embedded_app.queue.cycle_repeat();
-        replay_from_near_end(&mut embedded_app, &ctx, 7.1);
+        replay_from_near_end(&mut embedded_app, &ctx);
         assert_eq!(
             embedded_app.player.as_ref().unwrap().selected_subtitle(),
             Some(second.as_str())
@@ -2068,7 +2070,7 @@ mod tests {
             embedded_app.player.as_ref().unwrap().selected_subtitle(),
             None
         );
-        replay_from_near_end(&mut embedded_app, &ctx, 7.1);
+        replay_from_near_end(&mut embedded_app, &ctx);
         assert_eq!(
             embedded_app.player.as_ref().unwrap().selected_subtitle(),
             None
