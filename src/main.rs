@@ -81,6 +81,7 @@ struct MediaStrike {
     show_browser: bool,
     browser_folder: Option<PathBuf>,
     browser_items: Vec<PathBuf>,
+    browser_identities: Vec<Option<PathBuf>>,
     browser_search: String,
     browser_ascending: bool,
     focus_view: bool,
@@ -128,6 +129,7 @@ impl MediaStrike {
             show_browser: false,
             browser_folder: None,
             browser_items: Vec::new(),
+            browser_identities: Vec::new(),
             browser_search: String::new(),
             browser_ascending: true,
             focus_view: false,
@@ -890,9 +892,9 @@ impl MediaStrike {
                         self.browser_search.clear();
                     }
                     let filter = self.browser_search.trim().to_lowercase();
-                    let mut matches: Vec<_> = self.browser_items.iter()
-                        .filter(|path| filter.is_empty() || file_label(path).to_lowercase().contains(&filter))
-                        .cloned().collect();
+                    let mut matches: Vec<_> = self.browser_items.iter().enumerate()
+                        .filter(|(_, path)| filter.is_empty() || file_label(path).to_lowercase().contains(&filter))
+                        .map(|(index, path)| (index, path.clone())).collect();
                     if !self.browser_ascending { matches.reverse(); }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("{} of {} files", matches.len(), self.browser_items.len())).color(MUTED_TEXT));
@@ -908,8 +910,11 @@ impl MediaStrike {
                         if ui.button("Clear search").clicked() { self.browser_search.clear(); search.request_focus(); }
                     } else {
                         egui::ScrollArea::vertical().show(ui, |ui| {
-                            for path in matches {
-                                let selected = self.player.as_ref().is_some_and(|player| player.path == path);
+                            let playing_identity = self.player.as_ref().and_then(|player| fs::canonicalize(&player.path).ok());
+                            for (index, path) in matches {
+                                let selected = self.player.as_ref().is_some_and(|player| {
+                                    media_paths_match(&player.path, playing_identity.as_deref(), &path, self.browser_identities[index].as_deref())
+                                });
                                 let row = ui.selectable_label(selected, file_label(&path));
                                 if row.clicked() || (row.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))) {
                                     browse_play = Some(path);
@@ -920,7 +925,7 @@ impl MediaStrike {
                 });
         }
         if let Some(path) = browse_play {
-            if let Some(index) = self.queue.items().iter().position(|item| item == &path) {
+            if let Some(index) = matching_queue_index(self.queue.items(), &path) {
                 self.open_index(index, ctx.clone());
             } else {
                 self.enqueue_media(vec![path], true, ctx.clone());
@@ -1114,6 +1119,7 @@ impl MediaStrike {
             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                 match scan_media_folder(&folder) {
                     Ok(items) => {
+                        self.browser_identities = items.iter().map(|path| fs::canonicalize(path).ok()).collect();
                         self.browser_items = items;
                         self.browser_folder = Some(folder);
                         self.browser_search.clear();
@@ -1139,6 +1145,17 @@ impl eframe::App for MediaStrike {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_ui(ctx);
     }
+}
+
+fn media_paths_match(left: &Path, left_identity: Option<&Path>, right: &Path, right_identity: Option<&Path>) -> bool {
+    left == right || left_identity.zip(right_identity).is_some_and(|(a, b)| a == b)
+}
+
+fn matching_queue_index(items: &[PathBuf], path: &Path) -> Option<usize> {
+    let identity = fs::canonicalize(path).ok();
+    items.iter().position(|item| {
+        media_paths_match(item, fs::canonicalize(item).ok().as_deref(), path, identity.as_deref())
+    })
 }
 
 fn scan_media_folder(folder: &Path) -> Result<Vec<PathBuf>, String> {
@@ -1324,7 +1341,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{MediaStrike, PlayerShortcuts, format_time, parse_launch_args, player_shortcuts, scan_media_folder, is_media_path};
+    use super::{MediaStrike, PlayerShortcuts, format_time, parse_launch_args, player_shortcuts, scan_media_folder, is_media_path, matching_queue_index, media_paths_match};
     use eframe::egui;
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
@@ -1339,6 +1356,7 @@ mod tests {
             show_browser: false,
             browser_folder: None,
             browser_items: Vec::new(),
+            browser_identities: Vec::new(),
             browser_search: String::new(),
             browser_ascending: true,
             focus_view: false,
@@ -1372,6 +1390,21 @@ mod tests {
         assert_eq!(files.iter().map(|path| path.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>(), vec!["a.flac", "b.MP4"]);
         assert!(is_media_path(Path::new("voice.OPUS")));
         assert!(!is_media_path(Path::new("script.exe")));
+    }
+
+    #[test]
+    fn browser_matches_relative_queue_path_by_file_identity() {
+        let folder = PathBuf::from(format!("mediastrike-path-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&folder).unwrap();
+        let relative = folder.join("clip.mp4");
+        std::fs::write(&relative, b"synthetic").unwrap();
+        let absolute = std::fs::canonicalize(&relative).unwrap();
+        assert_ne!(relative, absolute);
+        assert!(media_paths_match(&relative, Some(&absolute), &absolute, Some(&absolute)));
+        assert_eq!(matching_queue_index(&[relative.clone(), relative.clone()], &absolute), Some(0));
+        assert_eq!(matching_queue_index(&[PathBuf::from("missing.mp4")], &absolute), None);
+        std::fs::remove_file(&relative).unwrap();
+        std::fs::remove_dir(&folder).unwrap();
     }
 
     fn wait_for_position_at_least(app: &mut MediaStrike, ctx: &egui::Context, minimum: f64) -> f64 {
