@@ -37,13 +37,13 @@ jobs:
           $conda = Join-Path $env:CONDA 'Scripts\conda.exe'
           $prefix = Join-Path $env:RUNNER_TEMP 'mediastrike-gstreamer'
           & $conda create --yes --prefix $prefix --override-channels --channel conda-forge --solver libmamba 'gstreamer=1.26.11' 'gst-plugins-base=1.26.11' 'gst-plugins-good=1.26.11' pkg-config
-          if ($LASTEXITCODE -ne 0) { throw 'Conda-forge GStreamer installation failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Conda-forge GStreamer installation failed"; throw 'Conda-forge GStreamer installation failed' }
           $gst = Join-Path $prefix 'Library'
           if (-not (Test-Path (Join-Path $gst 'bin\pkg-config.exe'))) { throw 'Conda-forge pkg-config was not found' }
           if (-not (Test-Path (Join-Path $gst 'bin\gst-launch-1.0.exe'))) { throw 'Conda-forge GStreamer runtime was not found' }
           $env:PKG_CONFIG_PATH = "$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig"
           & "$gst\bin\pkg-config.exe" --modversion gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0
-          if ($LASTEXITCODE -ne 0) { throw 'Conda-forge GStreamer development files are incomplete' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Conda-forge GStreamer development files are incomplete"; throw 'Conda-forge GStreamer development files are incomplete' }
           "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gst" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "PKG_CONFIG=$gst\bin\pkg-config.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "PKG_CONFIG_PATH=$gst\lib\pkgconfig;$gst\lib\gstreamer-1.0\pkgconfig" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
@@ -71,9 +71,9 @@ jobs:
           $env:PLAYSTRIKE_SAMPLE_SECOND = $second
           $env:GST_AUDIOSINK = 'fakesink'
           cargo test --locked -j 2 decodes_and_controls_local_audio_video -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Headless playback test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Headless playback test failed"; throw 'Headless playback test failed' }
           cargo test --locked -j 2 native_queue_controls_and_end_of_file_advance -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Native queue and end-of-file test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Native queue and end-of-file test failed"; throw 'Native queue and end-of-file test failed' }
           $subtitleVideo = Join-Path $env:RUNNER_TEMP 'mediastrike-subtitle-video.avi'
           $subtitleVideoGst = $subtitleVideo.Replace('\', '/')
           & gst-launch-1.0.exe -q avimux name=mux ! filesink "location=$subtitleVideoGst" `
@@ -85,13 +85,13 @@ jobs:
           $env:PLAYSTRIKE_SUBTITLE_VIDEO = $subtitleVideo
           $env:PLAYSTRIKE_SUBTITLE_SAMPLE = $subtitle
           cargo test --locked -j 2 focus_ -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Focus transition drag test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Focus transition drag test failed"; throw 'Focus transition drag test failed' }
           cargo test --locked -j 2 mute_survives_queue_and_subtitle_replacement -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Mute continuity test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Mute continuity test failed"; throw 'Mute continuity test failed' }
           cargo test --locked -j 2 playback_speed_survives_seek_queue_subtitle_and_focus -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Playback speed continuity test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Playback speed continuity test failed"; throw 'Playback speed continuity test failed' }
           cargo test --locked -j 2 discovers_and_switches_external_subtitle_track -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'External subtitle track test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::External subtitle track test failed"; throw 'External subtitle track test failed' }
           $vtt = Join-Path $env:RUNNER_TEMP 'mediastrike-synthetic.vtt'
           @('WEBVTT', '', '00:00:00.000 --> 00:00:05.500', 'Synthetic VTT caption', '') | Set-Content -LiteralPath $vtt -Encoding ascii
           $malformed = Join-Path $env:RUNNER_TEMP 'mediastrike-malformed.srt'
@@ -107,11 +107,11 @@ jobs:
           if ((Get-Item $audioVideo).Length -gt 3MB) { throw 'Mute PCM fixture exceeds 3 MiB cap' }
           $env:PLAYSTRIKE_MUTE_AUDIO_VIDEO = $audioVideo
           cargo test --locked -j 2 muted_pcm_output_survives_start_pause_and_replay -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'Mute startup, pause, and replay output-sample test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Mute startup, pause, and replay output-sample test failed"; throw 'Mute startup, pause, and replay output-sample test failed' }
           cargo test --locked -j 2 muted_pcm_survives_app_subtitle_failure -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'App subtitle failure mute output-sample test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::App subtitle failure mute output-sample test failed"; throw 'App subtitle failure mute output-sample test failed' }
           cargo test --locked -j 2 rejected_initial_rate_falls_back_and_keeps_playback -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'Rejected rate fallback test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Rejected rate fallback test failed"; throw 'Rejected rate fallback test failed' }
           $audioOnly = Join-Path $env:RUNNER_TEMP 'mediastrike-audio-only.wav'
           $audioOnlyGst = $audioOnly.Replace('\', '/')
           & gst-launch-1.0.exe -q audiotestsrc wave=sine num-buffers=80 samplesperbuffer=1600 ! 'audio/x-raw,format=S16LE,channels=1,rate=16000' ! wavenc ! filesink "location=$audioOnlyGst"
@@ -119,7 +119,7 @@ jobs:
           if ((Get-Item $audioOnly).Length -gt 1MB) { throw 'Audio-only fixture exceeds 1 MiB cap' }
           $env:PLAYSTRIKE_AUDIO_ONLY = $audioOnly
           cargo test --locked -j 2 audio_only_rate_uses_pipeline_fallback -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'Audio-only rate fallback test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Audio-only rate fallback test failed"; throw 'Audio-only rate fallback test failed' }
           $avTiming = Join-Path $env:RUNNER_TEMP 'mediastrike-av-timing.mkv'
           $avTimingGst = $avTiming.Replace('\', '/')
           & gst-launch-1.0.exe -q -e matroskamux name=mux ! filesink "location=$avTimingGst" `
@@ -129,11 +129,11 @@ jobs:
           if ((Get-Item $avTiming).Length -gt 3MB) { throw 'A/V timing fixture exceeds 3 MiB cap' }
           $env:PLAYSTRIKE_AV_TIMING_VIDEO = $avTiming
           cargo test --locked -j 2 audio_video_timestamps_align_at_supported_rates -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'A/V timestamp alignment test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::A/V timestamp alignment test failed"; throw 'A/V timestamp alignment test failed' }
           cargo test --locked -j 2 rate_during_malformed_subtitle_recovery -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'Rate change during malformed subtitle recovery test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Rate change during malformed subtitle recovery test failed"; throw 'Rate change during malformed subtitle recovery test failed' }
           cargo test --locked -j 2 mute_and_speed_buttons_accept_egui_pointer_events -- --ignored --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'Egui pointer control activation test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Egui pointer control activation test failed"; throw 'Egui pointer control activation test failed' }
           # Best-effort native renderer probe. Hosted runners may not expose a desktop.
           New-Item -ItemType Directory -Force artifact | Out-Null
           "source=$env:GITHUB_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
@@ -160,7 +160,7 @@ jobs:
           }
           Get-Content artifact/capture-probe.txt
           cargo test --locked -j 2 subtitle_file_choice_keeps_playback_on_cancel_and_async_failure -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Subtitle file state and async failure test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Subtitle file state and async failure test failed"; throw 'Subtitle file state and async failure test failed' }
           $embeddedA = Join-Path $env:RUNNER_TEMP 'mediastrike-embedded-a.srt'
           $embeddedB = Join-Path $env:RUNNER_TEMP 'mediastrike-embedded-b.srt'
           @('1', '00:00:00,000 --> 00:00:07,500', 'Embedded track A', '') | Set-Content -LiteralPath $embeddedA -Encoding ascii
@@ -177,11 +177,11 @@ jobs:
           if ((Get-Item $embedded).Length -gt 3MB) { throw 'Embedded subtitle fixture exceeds 3 MiB cap' }
           $env:PLAYSTRIKE_EMBEDDED_SUBTITLE_VIDEO = $embedded
           cargo test --locked -j 2 discovers_switches_and_disables_two_embedded_tracks -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Embedded subtitle selection test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Embedded subtitle selection test failed"; throw 'Embedded subtitle selection test failed' }
           cargo test --locked -j 2 pending_subtitle_choice_ -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Pending subtitle choice test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Pending subtitle choice test failed"; throw 'Pending subtitle choice test failed' }
           cargo test --locked -j 2 repeat_one_keeps_external_and_embedded_subtitle_choices -- --ignored
-          if ($LASTEXITCODE -ne 0) { throw 'Repeat-one subtitle continuity test failed' }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Repeat-one subtitle continuity test failed"; throw 'Repeat-one subtitle continuity test failed' }
       - name: Bound and hash executable
         shell: pwsh
         run: |
