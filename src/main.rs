@@ -717,7 +717,7 @@ impl MediaStrike {
                             }
                             next_clicked = ui.button("Next").clicked();
                             let mute_button = ui.button(if self.muted { "Unmute" } else { "Mute" });
-                            let speed_button = ui.button(format!("Speed {:.1}x", self.speed));
+                            let speed_button = ui.button(format!("Speed {:.1}×", self.speed));
                             #[cfg(test)]
                             {
                                 self.ui_mute_rect = Some(mute_button.rect);
@@ -847,7 +847,7 @@ impl MediaStrike {
                             }
                             ui.label(format!("{}%", (self.volume * 100.0).round() as i32));
                             let mute_button = ui.button(if self.muted { "Unmute" } else { "Mute" });
-                            let speed_button = ui.button(format!("Speed {:.1}x", self.speed));
+                            let speed_button = ui.button(format!("Speed {:.1}×", self.speed));
                             #[cfg(test)]
                             {
                                 self.ui_mute_rect = Some(mute_button.rect);
@@ -983,7 +983,7 @@ impl MediaStrike {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.heading("Browse local media");
-                        if ui.button("Choose folder.").clicked() { pick_folder = true; }
+                        if ui.button("Choose folder…").clicked() { pick_folder = true; }
                     });
                     if let Some(folder) = &self.browser_folder {
                         ui.label(egui::RichText::new(folder.display().to_string()).color(MUTED_TEXT).small());
@@ -1004,7 +1004,7 @@ impl MediaStrike {
                     if !self.browser_ascending { matches.reverse(); }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("{} of {} files", matches.len(), self.browser_items.len())).color(MUTED_TEXT));
-                        if ui.button(if self.browser_ascending { "Name A-Z" } else { "Name Z-A" }).clicked() {
+                        if ui.button(if self.browser_ascending { "Name A–Z" } else { "Name Z–A" }).clicked() {
                             self.browser_ascending = !self.browser_ascending;
                         }
                     });
@@ -2010,7 +2010,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         panic!(
-            "GStreamer did not apply {expected:.1}x; actual: {:?}, error: {:?}",
+            "GStreamer did not apply {expected:.1}×; actual: {:?}, error: {:?}",
             app.player.as_ref().and_then(|player| player.effective_rate()),
             app.error
         );
@@ -2101,7 +2101,7 @@ mod tests {
         app.cycle_speed();
         assert_eq!(app.speed, 1.5);
         wait_for_speed(&mut app, &ctx, 1.5);
-        app.player.as_ref().unwrap().seek(1.0).expect("seek at 1.5x");
+        app.player.as_ref().unwrap().seek(1.0).expect("seek at 1.5×");
         wait_for_speed(&mut app, &ctx, 1.5);
         assert!(app.player.as_mut().unwrap().set_rate(0.0).is_err());
         assert_eq!(app.player.as_ref().unwrap().rate, 1.5);
@@ -2573,7 +2573,18 @@ mod tests {
     fn repeat_one_keeps_external_and_embedded_subtitle_choices() {
         fn replay_from_near_end(app: &mut MediaStrike, ctx: &egui::Context) {
             app.status.clear();
-            let duration = app.player.as_ref().unwrap().duration().expect("synthetic video duration");
+            // GStreamer can expose subtitle tracks before duration queries
+            // settle. Wait for the seekable fixture as the queue test does.
+            let ready_deadline = Instant::now() + Duration::from_secs(5);
+            let duration = loop {
+                if let Some(duration) = app.player.as_ref().unwrap().duration() {
+                    break duration;
+                }
+                assert!(Instant::now() < ready_deadline, "synthetic video duration did not settle");
+                app.refresh_player(ctx);
+                assert!(app.error.is_none(), "fixture playback failed: {:?}", app.error);
+                std::thread::sleep(Duration::from_millis(20));
+            };
             assert!(duration > 1.0, "repeat fixture needs a seekable duration");
             app.player.as_ref().unwrap().seek(duration - 0.9).unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
