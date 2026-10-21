@@ -1306,7 +1306,7 @@ fn file_label(path: &std::path::Path) -> String {
 
 fn load_brand_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let rgba = image::load_from_memory(include_bytes!(
-        "../assets/branding/playstrike-lyrebird-icon.png"
+        "../assets/branding/MediaStrike-geometric.png"
     ))
     .ok()?
     .into_rgba8();
@@ -1408,11 +1408,15 @@ fn main() -> ExitCode {
     let capture = capture_path
         .zip(capture_result.clone())
         .map(|(path, outcome)| CaptureOnce::new(path, subtitle_path.clone(), outcome));
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1120.0, 720.0])
+        .with_min_inner_size([640.0, 400.0])
+        .with_title("MediaStrike");
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/branding/MediaStrike-geometric.png")) {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1120.0, 720.0])
-            .with_min_inner_size([640.0, 400.0])
-            .with_title("MediaStrike"),
+        viewport,
         ..Default::default()
     };
     match eframe::run_native(

@@ -1,6 +1,15 @@
 name: MediaStrike native preview
 
 on:
+  pull_request:
+    paths:
+      - 'assets/branding/**'
+      - 'src/main.rs'
+      - 'build.rs'
+      - 'build_support/**'
+      - 'tools/verify_geometric_identity.py'
+      - 'tools/test_icon_resource_verifier.py'
+      - '.github/workflows/native-preview.yml'
   push:
     branches:
       - codex/mediastrike-rename
@@ -25,6 +34,7 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
+      STRIKE_REQUIRE_ICON: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Select stable Rust
@@ -55,6 +65,13 @@ jobs:
       - name: Build native executable
         shell: pwsh
         run: cargo build --locked -j 2
+      - name: Verify original art and exact embedded geometric icon
+        shell: pwsh
+        run: |
+          python tools/test_icon_resource_verifier.py
+          if ($LASTEXITCODE -ne 0) { throw 'Icon resource negative controls failed' }
+          python tools/verify_geometric_identity.py --svg assets/branding/MediaStrike-geometric.svg --png assets/branding/MediaStrike-geometric.png --ico assets/branding/MediaStrike-geometric.ico --original assets/branding/playstrike-lyrebird-icon.png --original-sha256 e70d389da59b738fe0d1fa55b133c2942485f88ae9d70eb339e3b4163a1d502a --exe target/debug/playstrike.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Geometric identity or linked resource verification failed' }
       - name: Exercise decoded local playback
         shell: pwsh
         run: |

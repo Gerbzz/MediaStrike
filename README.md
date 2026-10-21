@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/playstrike-lyrebird-icon.png" alt="Original lyrebird logo for MediaStrike" width="160" height="160">
+  <img src="assets/branding/MediaStrike-geometric.svg" alt="MediaStrike: an open viewing plane with a forward play cutout" width="160" height="160">
 </p>
 
 # MediaStrike
@@ -98,7 +98,7 @@ The executable and Cargo package are still named `playstrike` so existing launch
 
 This is a **first Windows source slice**, with no verified installer or VLC feature parity. A hosted Windows build, Rust unit tests, and a GStreamer playback test with a small uncompressed AVI passed. A native renderer capture shows two queued test files and a decoded frame. Interactive queue and transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
-The original [lyrebird artwork](assets/branding) is included in the start view and About panel; native app-icon integration remains pending. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
+The original [geometric playback mark](assets/branding/MediaStrike-geometric.svg) is used in the start view, About panel and native window icon. The historical lyrebird artwork remains preserved. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
 Explore the other [PWDS Strike repositories](https://github.com/Gerbzz?tab=repositories&q=Strike).
 
