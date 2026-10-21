@@ -37,6 +37,20 @@ jobs:
       STRIKE_REQUIRE_ICON: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify checked-out source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $source = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $source -ne $expected) { throw 'Checkout does not match the requested source head' }
+          $tree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Source tree lookup failed' }
+          "STRIKE_SOURCE_SHA=$source" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STRIKE_SOURCE_TREE=$tree" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "Verified source head: $source; tree: $tree"
       - name: Select stable Rust
         shell: pwsh
         run: rustup default stable
@@ -153,7 +167,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Egui pointer control activation test failed"; throw 'Egui pointer control activation test failed' }
           # Best-effort native renderer probe. Hosted runners may not expose a desktop.
           New-Item -ItemType Directory -Force artifact | Out-Null
-          "source=$env:GITHUB_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
+          "source=$env:STRIKE_SOURCE_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
           foreach ($view in @('normal', 'focus')) {
             $capture = Join-Path $env:RUNNER_TEMP "mediastrike-$view-control-preview.png"
             $arguments = @($avTiming, '--capture', $capture)
@@ -208,9 +222,10 @@ jobs:
           New-Item -ItemType Directory -Force artifact | Out-Null
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
           "$sha  playstrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
-          "commit=$env:GITHUB_SHA" | Set-Content artifact/SOURCE.txt -Encoding ascii
+          "commit=$env:STRIKE_SOURCE_SHA" | Set-Content artifact/SOURCE.txt -Encoding ascii
+          "tree=$env:STRIKE_SOURCE_TREE" | Add-Content artifact/SOURCE.txt -Encoding ascii
           "cargo_lock_sha256=$((Get-FileHash Cargo.lock -Algorithm SHA256).Hash)" | Add-Content artifact/SOURCE.txt -Encoding ascii
-          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha; source: $env:GITHUB_SHA"
+          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha; source: $env:STRIKE_SOURCE_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: mediastrike-native-preview

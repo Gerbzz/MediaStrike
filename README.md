@@ -2,14 +2,15 @@
   <img src="assets/branding/MediaStrike-geometric.svg" alt="MediaStrike: an open viewing plane with a forward play cutout" width="160" height="160">
 </p>
 
-# MediaStrike
-
 <p align="center">
   <a href="https://prowebdevsolutions.com"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/branding/PWDS-logo-orange.svg">
     <img src="assets/branding/PWDS-logo.png" alt="PWDS company logo" width="120">
   </picture></a>
 </p>
+<p align="center"><strong>Published by PWDS</strong></p>
+
+<h1 align="center">MediaStrike</h1>
 
 **Press play on media you already have.** MediaStrike is a focused Windows desktop player for local video and audio files. Open a file, drop it into the window, or pass its path when launching.
 
