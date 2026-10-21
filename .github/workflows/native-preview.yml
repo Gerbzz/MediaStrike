@@ -172,8 +172,10 @@ jobs:
             $capture = Join-Path $env:RUNNER_TEMP "mediastrike-$view-control-preview.png"
             $arguments = @($avTiming, '--capture', $capture)
             if ($view -eq 'focus') { $arguments = @($avTiming, '--focus-view', '--capture', $capture) }
+            $captureStdout = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-stdout.txt"
+            $captureStderr = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-stderr.txt"
             try {
-              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden
+              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $captureStdout -RedirectStandardError $captureStderr
               if (-not $app.WaitForExit(20000)) {
                 $app.Kill()
                 $app.WaitForExit()
@@ -187,6 +189,19 @@ jobs:
               }
             } catch {
               "$view=unavailable error=$($_.Exception.GetType().Name)" | Add-Content artifact/capture-probe.txt -Encoding ascii
+            } finally {
+              foreach ($stream in @('stdout', 'stderr')) {
+                $diagnostic = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-$stream.txt"
+                if (Test-Path -LiteralPath $diagnostic) {
+                  $bytes = (Get-Item -LiteralPath $diagnostic).Length
+                  "[$view $stream bytes=$bytes]" | Add-Content artifact/capture-probe.txt -Encoding ascii
+                  if ($bytes -le 16KB) {
+                    Get-Content -Raw -LiteralPath $diagnostic | Add-Content artifact/capture-probe.txt -Encoding ascii
+                  } else {
+                    'Diagnostic omitted: exceeds 16 KiB cap' | Add-Content artifact/capture-probe.txt -Encoding ascii
+                  }
+                }
+              }
             }
           }
           Get-Content artifact/capture-probe.txt
