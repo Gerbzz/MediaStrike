@@ -1,6 +1,15 @@
 name: MediaStrike native preview
 
 on:
+  pull_request:
+    paths:
+      - 'assets/branding/**'
+      - 'src/main.rs'
+      - 'build.rs'
+      - 'build_support/**'
+      - 'tools/verify_geometric_identity.py'
+      - 'tools/test_icon_resource_verifier.py'
+      - '.github/workflows/native-preview.yml'
   push:
     branches:
       - codex/mediastrike-rename
@@ -25,8 +34,23 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
+      STRIKE_REQUIRE_ICON: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify checked-out source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $source = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $source -ne $expected) { throw 'Checkout does not match the requested source head' }
+          $tree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Source tree lookup failed' }
+          "STRIKE_SOURCE_SHA=$source" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STRIKE_SOURCE_TREE=$tree" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "Verified source head: $source; tree: $tree"
       - name: Select stable Rust
         shell: pwsh
         run: rustup default stable
@@ -55,6 +79,13 @@ jobs:
       - name: Build native executable
         shell: pwsh
         run: cargo build --locked -j 2
+      - name: Verify original art and exact embedded geometric icon
+        shell: pwsh
+        run: |
+          python tools/test_icon_resource_verifier.py
+          if ($LASTEXITCODE -ne 0) { throw 'Icon resource negative controls failed' }
+          python tools/verify_geometric_identity.py --svg assets/branding/MediaStrike-geometric.svg --png assets/branding/MediaStrike-geometric.png --ico assets/branding/MediaStrike-geometric.ico --original assets/branding/playstrike-lyrebird-icon.png --original-sha256 e70d389da59b738fe0d1fa55b133c2942485f88ae9d70eb339e3b4163a1d502a --exe target/debug/playstrike.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Geometric identity or linked resource verification failed' }
       - name: Exercise decoded local playback
         shell: pwsh
         run: |
@@ -136,13 +167,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Output "::error title=MediaStrike playback::Egui pointer control activation test failed"; throw 'Egui pointer control activation test failed' }
           # Best-effort native renderer probe. Hosted runners may not expose a desktop.
           New-Item -ItemType Directory -Force artifact | Out-Null
-          "source=$env:GITHUB_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
+          "source=$env:STRIKE_SOURCE_SHA" | Set-Content artifact/capture-probe.txt -Encoding ascii
           foreach ($view in @('normal', 'focus')) {
             $capture = Join-Path $env:RUNNER_TEMP "mediastrike-$view-control-preview.png"
             $arguments = @($avTiming, '--capture', $capture)
             if ($view -eq 'focus') { $arguments = @($avTiming, '--focus-view', '--capture', $capture) }
+            $captureStdout = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-stdout.txt"
+            $captureStderr = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-stderr.txt"
             try {
-              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden
+              $app = Start-Process -FilePath 'target/debug/playstrike.exe' -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $captureStdout -RedirectStandardError $captureStderr
               if (-not $app.WaitForExit(20000)) {
                 $app.Kill()
                 $app.WaitForExit()
@@ -156,6 +189,19 @@ jobs:
               }
             } catch {
               "$view=unavailable error=$($_.Exception.GetType().Name)" | Add-Content artifact/capture-probe.txt -Encoding ascii
+            } finally {
+              foreach ($stream in @('stdout', 'stderr')) {
+                $diagnostic = Join-Path $env:RUNNER_TEMP "mediastrike-$view-capture-$stream.txt"
+                if (Test-Path -LiteralPath $diagnostic) {
+                  $bytes = (Get-Item -LiteralPath $diagnostic).Length
+                  "[$view $stream bytes=$bytes]" | Add-Content artifact/capture-probe.txt -Encoding ascii
+                  if ($bytes -le 16KB) {
+                    Get-Content -Raw -LiteralPath $diagnostic | Add-Content artifact/capture-probe.txt -Encoding ascii
+                  } else {
+                    'Diagnostic omitted: exceeds 16 KiB cap' | Add-Content artifact/capture-probe.txt -Encoding ascii
+                  }
+                }
+              }
             }
           }
           Get-Content artifact/capture-probe.txt
@@ -191,9 +237,10 @@ jobs:
           New-Item -ItemType Directory -Force artifact | Out-Null
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
           "$sha  playstrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
-          "commit=$env:GITHUB_SHA" | Set-Content artifact/SOURCE.txt -Encoding ascii
+          "commit=$env:STRIKE_SOURCE_SHA" | Set-Content artifact/SOURCE.txt -Encoding ascii
+          "tree=$env:STRIKE_SOURCE_TREE" | Add-Content artifact/SOURCE.txt -Encoding ascii
           "cargo_lock_sha256=$((Get-FileHash Cargo.lock -Algorithm SHA256).Hash)" | Add-Content artifact/SOURCE.txt -Encoding ascii
-          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha; source: $env:GITHUB_SHA"
+          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha; source: $env:STRIKE_SOURCE_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: mediastrike-native-preview
