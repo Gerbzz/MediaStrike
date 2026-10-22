@@ -16,19 +16,26 @@
 
 [How to run](#run-from-source) · [Verification](VERIFY.md) · [Original artwork](assets/branding)
 
-## Player preview
+## Native screenshots
+
+A native screenshot of the current build with geometric branding is pending. The [hosted capture attempt](https://github.com/Gerbzz/MediaStrike/actions/runs/39690347881/job/119534723658) stopped before rendering because OpenGL 2.0+ was unavailable on the runner.
+
+<details>
+<summary>Historical native screenshots</summary>
+
+These captures document earlier source revisions and predate the geometric identity.
 
 ### Video-focused player view
 
 ![MediaStrike focus view playing a synthetic captioned local video](assets/screenshots/mediastrike-focus-1517f4a.png)
 
-The [source-matched focus capture](docs/FOCUS_VIEW_FINAL_CAPTURE_PROVENANCE.md) shows the video using the window width with a full-width seek track in one transport row. The matching [normal-view capture](assets/screenshots/mediastrike-normal-1517f4a.png) shows the rails before focus mode. Both use synthetic local media and the same hosted Windows executable. Native F11 and button clicks still need hands-on review. The [first focus capture](docs/FOCUS_VIEW_CAPTURE_PROVENANCE.md) remains for comparison.
+The [focus capture from source `1517f4a`](docs/FOCUS_VIEW_FINAL_CAPTURE_PROVENANCE.md) shows the video using the window width with a full-width seek track in one transport row. The matching [normal-view capture](assets/screenshots/mediastrike-normal-1517f4a.png) shows the rails before focus mode. Both use synthetic local media and the same hosted Windows executable. Native F11 and button clicks still need hands-on review. The [first focus capture](docs/FOCUS_VIEW_CAPTURE_PROVENANCE.md) remains for comparison.
 
 ### MediaStrike subtitle preview
 
 ![MediaStrike source c48564e playing a synthetic local AVI with an external SRT caption](assets/screenshots/mediastrike-subtitles-srt-c48564e.png)
 
-These [fresh native renderer captures](docs/SUBTITLE_FINAL_CAPTURE_PROVENANCE.md) show visible [SRT](assets/screenshots/mediastrike-subtitles-srt-c48564e.png) and [WebVTT](assets/screenshots/mediastrike-subtitles-vtt-c48564e.png) captions from the verified follow-up source using synthetic local files. [Hosted follow-up tests](docs/SUBTITLE_FOLLOWUP_VERIFICATION.md) cover two embedded tracks, switching and Off, file choice while playing or paused, malformed files, Repeat one, and newer choices during a pending file load. Native menu clicks still need hands-on review; the [earlier captures](docs/SUBTITLE_CAPTURE_PROVENANCE.md) remain preserved.
+These [native renderer captures from source `c48564e`](docs/SUBTITLE_FINAL_CAPTURE_PROVENANCE.md) show visible [SRT](assets/screenshots/mediastrike-subtitles-srt-c48564e.png) and [WebVTT](assets/screenshots/mediastrike-subtitles-vtt-c48564e.png) captions from the verified follow-up source using synthetic local files. [Hosted follow-up tests](docs/SUBTITLE_FOLLOWUP_VERIFICATION.md) cover two embedded tracks, switching and Off, file choice while playing or paused, malformed files, Repeat one, and newer choices during a pending file load. Native menu clicks still need hands-on review; the [earlier captures](docs/SUBTITLE_CAPTURE_PROVENANCE.md) remain preserved.
 
 ### MediaStrike queue layout draft
 
@@ -47,6 +54,8 @@ This [earlier app-rendered capture](docs/MEDIASTRIKE_CAPTURE_PROVENANCE.md) come
 ![Historical PlayStrike capture showing a decoded frame from a synthetic local WebM](assets/screenshots/playstrike-player.png)
 
 The [earlier PlayStrike capture](docs/SCREENSHOT_PROVENANCE.md) remains here for comparison.
+
+</details>
 
 ## The player
 
@@ -97,7 +106,7 @@ The executable and Cargo package are still named `playstrike` so existing launch
 
 ## Current status
 
-This is a **first Windows source slice**, with no verified installer or VLC feature parity. A hosted Windows build, Rust unit tests, and a GStreamer playback test with a small uncompressed AVI passed. A native renderer capture shows two queued test files and a decoded frame. Interactive queue and transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
+This is a **first Windows source slice**, with no verified installer or VLC feature parity. A hosted Windows build, Rust unit tests, and a GStreamer playback test with a small uncompressed AVI passed. An earlier native renderer capture shows two queued test files and a decoded frame. Interactive queue and transport behavior, audible output, broader file compatibility, accessibility, and packaging remain unverified. [VERIFY.md](VERIFY.md) separates those checks from the work still needed.
 
 The original [geometric playback mark](assets/branding/MediaStrike-geometric.svg) is used in the start view, About panel and native window icon. The historical lyrebird artwork remains preserved. Distributing MediaStrike also requires packaging the native GStreamer runtime and reviewing plugin licenses. The next steps are a visible Windows player review, audible playback and seek checks, performance measurements, and runtime packaging.
 
