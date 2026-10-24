@@ -14,6 +14,12 @@
 
 **Press play on media you already have.** MediaStrike is a focused Windows desktop player for local video and audio files. Open a file, drop it into the window, or pass its path when launching.
 
+## Rust direction and migration status
+
+- **Target:** Build a Rust VLC alternative/port targeting full VLC-equivalent functionality, preserving useful playback workflows while migrating toward that foundation.
+- **Current implementation:** Published `main` is still the custom Rust `playstrike` application using eframe/egui and native GStreamer, as recorded in [`Cargo.toml`](Cargo.toml). It is not yet a VLC-derived implementation or the completed target foundation.
+- **Remaining migration:** Verify the VLC source and reuse boundary, port and integrate the required VLC functionality with source-matched parity, and retain queue/subtitle behavior through that transition. The [coverage map](docs/VLC_PARITY.md) is not full VLC parity; audible playback, broader compatibility, native interaction, and packaging still need acceptance.
+
 [How to run](#run-from-source) · [Verification](VERIFY.md) · [Original artwork](assets/branding)
 
 ## Native screenshots
